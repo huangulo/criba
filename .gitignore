@@ -1,0 +1,92 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.Python
+develop-eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Session files (Telethon)
+*.session
+*.session-journal
+
+# Data volumes
+data/
+
+# Database
+*.db
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Coverage / test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Docker
+docker-compose.override.yml
+
+# Next.js / Dashboard
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.env.local
+dashboard/.env.*.local
+
+# Playwright
+.playwright-mcp/
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Secrets
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# Dev/test injection scripts
+inject_*.py
+
+# Dashboard screenshot
+dashboard-validated.png

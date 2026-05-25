@@ -1,0 +1,200 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8030";
+
+export interface Narrative {
+  id: string;
+  label: string | null;
+  post_count: number;
+  platform_spread: number;
+  status: string;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface Campaign {
+  id: string;
+  label: string | null;
+  confidence: number | null;
+  account_count: number | null;
+  post_count: number | null;
+  platforms: string[] | null;
+  status: string;
+  detected_at: string;
+}
+
+export interface FlaggedPost {
+  id: string;
+  content: string;
+  source: string;
+  author_handle: string | null;
+  published_at: string;
+  anomaly_score: number;
+  narrative_category: string | null;
+  coordination_probability: number | null;
+  recommended_action: string | null;
+}
+
+export interface StatsSummary {
+  total_posts: number;
+  flagged_posts: number;
+  analyzed_posts: number;
+  active_narratives: number;
+  active_campaigns: number;
+  clustered_posts: number;
+}
+
+export interface AlertMessage {
+  event_type: string;
+  message: string;
+  data: Record<string, unknown>;
+}
+
+export async function fetchNarratives(): Promise<Narrative[]> {
+  const res = await fetch(`${API_BASE}/api/narratives`);
+  if (!res.ok) throw new Error("Failed to fetch narratives");
+  return res.json();
+}
+
+export async function fetchCampaigns(): Promise<Campaign[]> {
+  const res = await fetch(`${API_BASE}/api/campaigns`);
+  if (!res.ok) throw new Error("Failed to fetch campaigns");
+  return res.json();
+}
+
+export async function fetchFlaggedPosts(): Promise<FlaggedPost[]> {
+  const res = await fetch(`${API_BASE}/api/posts/flagged`);
+  if (!res.ok) throw new Error("Failed to fetch flagged posts");
+  return res.json();
+}
+
+export async function fetchStats(): Promise<StatsSummary> {
+  const res = await fetch(`${API_BASE}/api/stats/summary`);
+  if (!res.ok) throw new Error("Failed to fetch stats");
+  return res.json();
+}
+
+export function getWsUrl(): string {
+  const base = API_BASE.replace(/^http/, "ws");
+  return `${base}/ws/alerts`;
+}
+
+export interface NetworkNode {
+  id: string;
+  handle: string | null;
+  platform: string | null;
+  degree: number;
+  is_cluster: boolean;
+  cluster_id: number | null;
+}
+
+export interface NetworkLink {
+  source: string;
+  target: string;
+  interaction: string;
+  weight: number;
+}
+
+export interface NetworkGraphData {
+  narrative_id: string;
+  narrative_label: string | null;
+  nodes: NetworkNode[];
+  links: NetworkLink[];
+  clusters: string[][];
+  total_authors: number;
+  total_interactions: number;
+}
+
+export async function fetchNetworkGraph(narrativeId: string): Promise<NetworkGraphData> {
+  const res = await fetch(`${API_BASE}/api/network/${narrativeId}`);
+  if (!res.ok) throw new Error("Failed to fetch network graph");
+  return res.json();
+}
+
+export interface InspectPost {
+  id: string;
+  source: string;
+  author_id: string;
+  author_handle: string | null;
+  content: string;
+  published_at: string;
+  composite_score: number | null;
+  coordination_probability: number | null;
+  narrative_category: string | null;
+}
+
+export interface CopypastaPhrase {
+  phrase: string;
+  count: number;
+  unique_authors: number;
+  percentage: number;
+}
+
+export interface PlatformBleedStep {
+  platform: string;
+  first_seen: string;
+  post_count: number;
+  unique_authors: number;
+  delay_minutes: number | null;
+}
+
+export interface CampaignInspectData {
+  campaign_id: string;
+  campaign_label: string | null;
+  confidence: number | null;
+  posts: InspectPost[];
+  total_posts: number;
+  unique_authors: number;
+  unique_platforms: number;
+  identity_ratio: number;
+  copypasta_phrases: CopypastaPhrase[];
+  platform_bleed: PlatformBleedStep[];
+  time_span_minutes: number | null;
+  evidence_summary: string;
+}
+
+export async function fetchCampaignInspect(campaignId: string): Promise<CampaignInspectData> {
+  const res = await fetch(`${API_BASE}/api/campaigns/${campaignId}/inspect`);
+  if (!res.ok) throw new Error("Failed to fetch campaign inspection");
+  return res.json();
+}
+
+export interface NotificationSettings {
+  slack_webhook_url: string;
+  discord_webhook_url: string;
+  telegram_bot_token: string;
+  telegram_chat_id: string;
+  confidence_threshold: number;
+}
+
+export interface TestAlertResult {
+  channel: string;
+  success: boolean;
+  error: string | null;
+}
+
+export async function fetchNotificationSettings(): Promise<NotificationSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/notifications`);
+  if (!res.ok) throw new Error("Failed to fetch notification settings");
+  return res.json();
+}
+
+export async function updateNotificationSettings(
+  settings: Partial<NotificationSettings>,
+): Promise<NotificationSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/notifications`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error("Failed to update notification settings");
+  return res.json();
+}
+
+export async function testAlertConnection(
+  channel: "slack" | "discord" | "telegram",
+): Promise<TestAlertResult> {
+  const res = await fetch(`${API_BASE}/api/alerts/test/${channel}`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to test alert connection");
+  return res.json();
+}

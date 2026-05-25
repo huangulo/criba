@@ -1,0 +1,145 @@
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class NarrativeResponse(BaseModel):
+    id: uuid.UUID
+    label: str | None
+    post_count: int
+    platform_spread: int
+    status: str
+    first_seen: datetime | None
+    last_seen: datetime | None
+
+
+class CampaignResponse(BaseModel):
+    id: uuid.UUID
+    label: str | None
+    confidence: float | None
+    account_count: int | None
+    post_count: int | None
+    platforms: list[str] | None
+    status: str
+    detected_at: datetime
+
+
+class FlaggedPostResponse(BaseModel):
+    id: uuid.UUID
+    content: str
+    source: str
+    author_handle: str | None
+    published_at: datetime
+    anomaly_score: float
+    narrative_category: str | None
+    coordination_probability: float | None
+    recommended_action: str | None
+
+
+class StatsSummary(BaseModel):
+    total_posts: int
+    flagged_posts: int
+    analyzed_posts: int
+    active_narratives: int
+    active_campaigns: int
+    clustered_posts: int
+
+
+class AlertMessage(BaseModel):
+    event_type: str
+    message: str
+    data: dict
+
+
+class NetworkNode(BaseModel):
+    id: str
+    handle: str | None
+    platform: str | None
+    degree: int
+    is_cluster: bool = False
+    cluster_id: int | None = None
+
+
+class NetworkLink(BaseModel):
+    source: str
+    target: str
+    interaction: str
+    weight: int
+
+
+class NetworkGraphResponse(BaseModel):
+    narrative_id: uuid.UUID
+    narrative_label: str | None
+    nodes: list[NetworkNode]
+    links: list[NetworkLink]
+    clusters: list[list[str]]
+    total_authors: int
+    total_interactions: int
+
+
+class InspectPost(BaseModel):
+    id: uuid.UUID
+    source: str
+    author_id: str
+    author_handle: str | None
+    content: str
+    published_at: datetime
+    composite_score: float | None = None
+    coordination_probability: float | None = None
+    narrative_category: str | None = None
+
+
+class CopypastaPhrase(BaseModel):
+    phrase: str
+    count: int
+    unique_authors: int
+    percentage: float
+
+
+class PlatformBleedStep(BaseModel):
+    platform: str
+    first_seen: datetime
+    post_count: int
+    unique_authors: int
+    delay_minutes: float | None = None
+
+
+class CampaignInspectResponse(BaseModel):
+    campaign_id: uuid.UUID
+    campaign_label: str | None
+    confidence: float | None
+    posts: list[InspectPost]
+    total_posts: int
+    unique_authors: int
+    unique_platforms: int
+
+    identity_ratio: float
+    copypasta_phrases: list[CopypastaPhrase]
+
+    platform_bleed: list[PlatformBleedStep]
+    time_span_minutes: float | None = None
+
+    evidence_summary: str
+
+
+class NotificationSettingsResponse(BaseModel):
+    slack_webhook_url: str = ""
+    discord_webhook_url: str = ""
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    confidence_threshold: float = 0.85
+
+
+class NotificationSettingsUpdate(BaseModel):
+    slack_webhook_url: str | None = None
+    discord_webhook_url: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    confidence_threshold: float | None = None
+
+
+class TestAlertResponse(BaseModel):
+    channel: str
+    success: bool
+    error: str | None = None
