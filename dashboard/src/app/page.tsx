@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Settings } from "lucide-react";
+import { Settings, Radio, FolderKanban } from "lucide-react";
 import StatsSummary from "@/components/StatsSummary";
 import NarrativeMap from "@/components/NarrativeMap";
 import CampaignList from "@/components/CampaignList";
@@ -9,6 +9,8 @@ import LiveAlerts from "@/components/LiveAlerts";
 import NetworkGraph from "@/components/NetworkGraph";
 import CampaignInspector from "@/components/CampaignInspector";
 import AlertSettings from "@/components/AlertSettings";
+import IngestionLog from "@/components/IngestionLog";
+import ProjectConsole from "@/components/ProjectConsole";
 
 export default function Home() {
   const [selectedNarrativeId, setSelectedNarrativeId] = useState<string | null>(
@@ -21,6 +23,8 @@ export default function Home() {
     null,
   );
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [ingestionLogOpen, setIngestionLogOpen] = useState(false);
+  const [projectConsoleOpen, setProjectConsoleOpen] = useState(false);
 
   const handleSelectNarrative = (id: string, label: string | null) => {
     setSelectedNarrativeId(id);
@@ -39,6 +43,22 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <LiveAlerts />
+            <button
+              onClick={() => setIngestionLogOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded border border-surface-border bg-surface-card hover:bg-surface-border transition-colors text-text-muted hover:text-text-primary"
+              title="Raw Ingestion Log"
+            >
+              <Radio className="w-4 h-4" />
+              <span className="text-xs font-mono">Firehose</span>
+            </button>
+            <button
+              onClick={() => setProjectConsoleOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded border border-surface-border bg-surface-card hover:bg-surface-border transition-colors text-text-muted hover:text-text-primary"
+              title="Projects & Settings"
+            >
+              <FolderKanban className="w-4 h-4" />
+              <span className="text-xs font-mono">Projects</span>
+            </button>
             <button
               onClick={() => setAlertSettingsOpen(true)}
               className="p-2 rounded border border-surface-border bg-surface-card hover:bg-surface-border transition-colors text-text-muted hover:text-text-primary"
@@ -66,6 +86,8 @@ export default function Home() {
         onClose={() => setSelectedCampaignId(null)}
       />
       <AlertSettings open={alertSettingsOpen} onClose={() => setAlertSettingsOpen(false)} />
+      <IngestionLog open={ingestionLogOpen} onClose={() => setIngestionLogOpen(false)} />
+      <ProjectConsole open={projectConsoleOpen} onClose={() => setProjectConsoleOpen(false)} />
     </main>
   );
 }

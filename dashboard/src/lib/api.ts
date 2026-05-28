@@ -198,3 +198,109 @@ export async function testAlertConnection(
   if (!res.ok) throw new Error("Failed to test alert connection");
   return res.json();
 }
+
+export interface IngestionLogPost {
+  id: string;
+  content: string;
+  platform: string;
+  author_handle: string | null;
+  published_at: string;
+  composite_score: number | null;
+}
+
+export interface IngestionLogFilters {
+  platform?: string;
+  max_score?: number;
+  limit?: number;
+}
+
+export async function fetchIngestionLogs(
+  filters: IngestionLogFilters = {},
+): Promise<IngestionLogPost[]> {
+  const params = new URLSearchParams();
+  if (filters.platform) params.set("platform", filters.platform);
+  if (filters.max_score !== undefined) params.set("max_score", String(filters.max_score));
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/api/posts/log${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch ingestion logs");
+  return res.json();
+}
+
+export interface BaselineSettings {
+  heuristic_threshold: number;
+  copypasta_threshold: number;
+  temporal_cluster_min: number;
+  new_account_days: number;
+}
+
+export interface BaselineSettingsUpdate {
+  heuristic_threshold?: number;
+  copypasta_threshold?: number;
+  temporal_cluster_min?: number;
+  new_account_days?: number;
+}
+
+export async function fetchBaselineSettings(): Promise<BaselineSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/baseline`);
+  if (!res.ok) throw new Error("Failed to fetch baseline settings");
+  return res.json();
+}
+
+export async function updateBaselineSettings(
+  settings: BaselineSettingsUpdate,
+): Promise<BaselineSettings> {
+  const res = await fetch(`${API_BASE}/api/settings/baseline`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error("Failed to update baseline settings");
+  return res.json();
+}
+
+export interface ProjectTarget {
+  id: string;
+  platform: string;
+  target_type: string;
+  value: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  targets: ProjectTarget[];
+}
+
+export interface ProjectCreate {
+  name: string;
+  description?: string;
+  targets: Array<{
+    platform: string;
+    target_type: string;
+    value: string;
+  }>;
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await fetch(`${API_BASE}/api/projects`);
+  if (!res.ok) throw new Error("Failed to fetch projects");
+  return res.json();
+}
+
+export async function createProject(data: ProjectCreate): Promise<Project> {
+  const res = await fetch(`${API_BASE}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create project");
+  return res.json();
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/projects/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete project");
+}

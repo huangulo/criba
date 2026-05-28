@@ -297,6 +297,28 @@ CREATE TABLE campaigns (
     platforms       TEXT[],
     status          VARCHAR(50) DEFAULT 'active'
 );
+
+-- Project-scoped monitoring targets (dynamic, managed via dashboard)
+CREATE TABLE projects (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE project_targets (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id  UUID REFERENCES projects(id) NOT NULL,
+    platform    VARCHAR(50) NOT NULL,
+    target_type VARCHAR(20) NOT NULL,  -- 'keyword' or 'handle'
+    value       VARCHAR(500) NOT NULL
+);
+
+-- Runtime configuration (replaces YAML for dynamic settings)
+CREATE TABLE system_settings (
+    key   VARCHAR(255) PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 ```
 
 ### Layer 5: API (FastAPI)
@@ -307,12 +329,17 @@ GET  /api/narratives/{id}         — Narrative detail with associated posts
 GET  /api/narratives/{id}/timeline — Platform bleed timeline
 GET  /api/campaigns               — Detected astroturfing campaigns
 GET  /api/campaigns/{id}          — Campaign detail with accounts and posts
-GET  /api/posts                   — Search/filter posts (source, date, score)
-GET  /api/posts/{id}/analysis     — Heuristic + LLM analysis for a post
+GET  /api/posts/flagged           — Flagged posts with heuristic + LLM scores
+GET  /api/posts/log               — Raw ingestion log (unflagged posts, baseline noise)
+GET  /api/stats/dashboard         — Aggregate stats for the dashboard
 GET  /api/graph/clusters          — Current network topology clusters
 GET  /api/graph/account/{id}      — Interaction graph for a specific account
-GET  /api/stats/dashboard         — Aggregate stats for the dashboard
-WS   /ws/live                     — WebSocket feed for real-time alerts
+GET/PUT /api/settings/notifications — Notification channel configuration
+GET/PUT /api/settings/baseline    — Heuristic threshold configuration (DB-backed)
+GET  /api/projects                — List active monitoring projects with targets
+POST /api/projects                — Create project with assigned targets
+DELETE /api/projects/{id}         — Delete project and cascade targets
+WS   /ws/alerts                   — WebSocket feed for real-time alerts
 ```
 
 ### Layer 6: Dashboard (Next.js)
@@ -322,9 +349,10 @@ WS   /ws/live                     — WebSocket feed for real-time alerts
 1. **Live Feed** — Real-time stream of flagged posts with anomaly scores
 2. **Narrative Map** — Bubble chart showing active narratives sized by momentum, colored by platform spread
 3. **Campaign Inspector** — Drill-down into detected astroturfing operations showing account clusters, posting timelines, and lexical similarity scores
-4. **Network Graph** — Interactive force-directed graph of author interactions, highlighting tight clusters
-5. **Timeline** — Platform bleed visualization showing how a narrative jumps from closed to open platforms over time
-6. **Source Health** — Monitoring panel for plugin status, ingestion rates, and error logs
+4. **Raw Ingestion Log (Firehose)** — Slide-over panel showing unflagged posts with filters for platform and max composite score, enabling audit of baseline noise
+5. **Network Graph** — Interactive force-directed graph of author interactions, highlighting tight clusters
+6. **Projects & Settings Console** — Three-tab management panel: baseline threshold sliders (heuristic, copypasta, temporal cluster, new account days), project builder with target injector, and active projects matrix with delete
+7. **Source Health** — Monitoring panel for plugin status, ingestion rates, and error logs
 
 ---
 
@@ -425,42 +453,136 @@ alerts:
   new_account_days: 7        # flag accounts younger than this
 ```
 
+### Runtime Configuration (Database-Backed)
+
+The following settings are stored in the `system_settings` table and can be modified at runtime through the API and dashboard without restarting services:
+
+| Setting Key | Default | Description |
+|-------------|---------|-------------|
+| `heuristic_threshold` | 0.6 | Composite score above this triggers LLM analysis |
+| `copypasta_threshold` | 10 | Flag if this many similar posts in 72h |
+| `temporal_cluster_min` | 5 | Flag if this many posts in anomalous window |
+| `new_account_days` | 7 | Flag accounts younger than this |
+| `confidence_threshold` | 0.85 | Campaign confidence required to trigger alerts |
+| `slack_webhook_url` | "" | Slack notification webhook |
+| `discord_webhook_url` | "" | Discord notification webhook |
+| `telegram_bot_token` | "" | Telegram bot token for notifications |
+| `telegram_chat_id` | "" | Telegram chat ID for notifications |
+
+Monitoring targets (channels, keywords, handles) are managed through the `projects` and `project_targets` tables. New targets added via the dashboard are picked up automatically by the next Celery beat cycle — no restart required.
+
+The `criba.yml` file remains for static infrastructure settings (Ollama host/model, source API credentials, poll intervals).
+
 ---
 
 ## Development Phases
 
-### Phase 1: Foundation (Current)
-- [ ] Project scaffold (Docker, Celery, Redis, PostgreSQL)
-- [ ] Plugin interface definition
-- [ ] Telegram plugin (Colombia political channels)
-- [ ] RSS plugin (Colombian news outlets)
-- [ ] Database schema migration
-- [ ] Basic heuristic filters (copypasta, temporal)
+### Phase 1: Foundation — Completed ✅
+- [x] Project scaffold (Docker Compose: PostgreSQL 16 + pgvector, Redis 7, Celery worker/beat, FastAPI, Next.js dashboard)
+- [x] Plugin interface definition (`SourcePlugin` ABC, `RawPost` dataclass, `RateLimitConfig`, plugin registry)
+- [x] Telegram plugin (Telethon-based, Colombia political channels)
+- [x] RSS plugin (feedparser-based, Colombian news outlets)
+- [x] Database schema migrations (Alembic: initial schema + post_embeddings table)
+- [x] Heuristic filter pipeline (7 filters: language, deduplication, copypasta, temporal anomaly, account age, hashtag co-occurrence, network graph)
 
-### Phase 2: Analysis Engine
-- [ ] Ollama integration with analysis prompt
-- [ ] Narrative clustering (semantic similarity via pgvector)
-- [ ] Network graph construction and community detection
-- [ ] Platform bleed tracking
+### Phase 2: Analysis Engine — Completed ✅
+- [x] Ollama integration with structured JSON analysis prompt (`OllamaClient`, `build_analysis_prompt`)
+- [x] Ollama embedding client (`OllamaEmbeddingClient` with `nomic-embed-text`, pgvector storage)
+- [x] Narrative clustering via cosine similarity on pgvector embeddings (`NarrativeEngine.cluster_posts`)
+- [x] Network graph construction and cluster detection (BFS-based community detection in API layer)
+- [x] Platform bleed tracking (per-narrative, computed in campaign inspector)
+- [x] Campaign auto-detection with multi-factor confidence scoring (`NarrativeEngine.detect_campaigns`)
 
-### Phase 3: API & Dashboard
-- [ ] FastAPI endpoints
-- [ ] WebSocket live feed
-- [ ] Next.js dashboard (live feed, narrative map, campaign inspector)
-- [ ] Network graph visualization (D3.js)
+### Phase 3: API & Dashboard — Completed ✅
+- [x] FastAPI endpoints:
+  - `GET /api/narratives` — Active narratives sorted by momentum
+  - `GET /api/campaigns` — Detected campaigns sorted by confidence
+  - `GET /api/posts/flagged` — Flagged posts with heuristic + LLM scores
+  - `GET /api/stats/summary` — Aggregate dashboard statistics
+  - `GET /api/network/{narrative_id}` — Interaction graph with cluster detection
+  - `GET /api/campaigns/{id}/inspect` — Campaign forensic detail (copypasta phrases, platform bleed, identity ratio, evidence summary)
+  - `GET/PUT /api/settings/notifications` — Notification channel configuration
+  - `POST /api/alerts/test/{channel}` — Test alert delivery
+- [x] WebSocket live feed (`/ws/alerts` with `ConnectionManager` for real-time broadcast)
+- [x] Next.js dashboard with components: LiveAlerts, NarrativeMap, CampaignList, CampaignInspector, NetworkGraph, StatsSummary, AlertSettings
+- [x] Celery beat schedule for automated ingestion (Telegram 60s, RSS 300s, Reddit 120s), LLM analysis (120s), embedding generation (180s), narrative clustering (300s), campaign detection (600s)
 
-### Phase 4: Expansion
-- [ ] Reddit plugin
-- [ ] Bluesky plugin
-- [ ] YouTube comments plugin
-- [ ] Multi-language support (Portuguese for Brazil, English for US)
-- [ ] Alert system (email/webhook on campaign detection)
+### Phase 4: Expansion — In Progress
 
-### Phase 5: Community
-- [ ] Plugin development documentation
-- [ ] Contributor guidelines
-- [ ] Pre-built configurations for common deployments (Colombia, Brazil, US, Mexico)
-- [ ] Academic research export formats
+**Completed:**
+- [x] Reddit plugin (PRAW-based, subreddit monitoring with configurable poll interval)
+- [x] Bluesky plugin (AT Protocol, keyword + handle tracking, `atproto` library)
+- [x] YouTube comments plugin (yt-dlp-based, channel comment extraction with Google API fallback)
+- [x] Alert system — Slack, Discord, Telegram notifications on campaign detection with configurable confidence threshold
+- [x] Notification settings API (`GET/PUT /api/settings/notifications`, `POST /api/alerts/test/{channel}`)
+- [x] Colombia deployment configuration (Telegram channels, RSS feeds, Reddit subreddits, Bluesky keywords/handles, YouTube political channels)
+- [x] **Raw Ingestion Log** — `GET /api/posts/log` endpoint + Firehose slide-over panel for auditing unflagged posts and baseline noise
+- [x] **Dynamic configuration from database** — `system_settings` table replaces YAML for runtime-tunable parameters (heuristic thresholds, alert settings, notification channels). No restart needed to apply changes.
+- [x] **Projects & Targets system** — `projects` + `project_targets` tables with full CRUD API. Celery ingestion tasks now query `project_targets` instead of parsing `criba.yml`.
+- [x] **Baseline Settings Console** — `GET/PUT /api/settings/baseline` + dashboard UI with threshold sliders
+- [x] **Project Console** — Three-tab management panel (Baseline, Projects, Active) integrated into dashboard header
+
+**Remaining:**
+
+#### Multi-Language Analysis
+Currently the system is configured for Spanish (`general.language: es`) with a single timezone (`America/Bogota`). Multi-language support requires:
+- [ ] **Language-aware LLM prompts** — The analysis prompt template (`src/criba/llm/prompt.py`) is English-only. Need localized prompt variants for Portuguese and English that instruct the model to reason and categorize in the target language.
+- [ ] **Per-source language config** — Allow `criba.yml` to specify a `language` per source so that, e.g., a Portuguese Telegram group and a Spanish RSS feed can coexist in the same deployment.
+- [ ] **Language-specific heuristic tuning** — Copypasta shingle size (currently 5 words), hashtag co-occurrence thresholds, and temporal anomaly baselines may need adjustment per language. The `LanguageFilter` currently detects language but does not gate downstream filter behavior by it.
+- [ ] **Multi-timezone ingestion** — Temporal anomaly detection (`TemporalAnomalyFilter`) builds baselines against UTC/local time. When monitoring multiple countries, each source needs its own timezone context for accurate anomaly scoring (e.g., a 3 AM spike in Bogota ≠ suspicious in London).
+- [ ] **Dashboard internationalization** — The Next.js dashboard has no i18n layer. Need `next-intl` or equivalent for Spanish, Portuguese, and English UI translations.
+
+#### Regional Deployment Profiles
+- [ ] **Brazil configuration** — Portuguese language, `America/Sao_Paulo` timezone, Brazilian Telegram groups, local RSS feeds (Folha, G1, Estadão), relevant subreddits.
+- [ ] **US configuration** — English language, multi-timezone (EST/PST), political subreddits, Bluesky handles for US politicians, RSS from major outlets.
+- [ ] **Mexico configuration** — Spanish language, `America/Mexico_City` timezone, Mexican political Telegram/RSS sources.
+- [ ] **Config profile switching** — `criba.yml` currently ships as a single file. Need a `--profile` flag or `criba.profiles/` directory with pre-built configs that can be loaded per deployment.
+
+#### Future Source Plugins
+- [ ] **Mastodon/Fediverse** — Open API, high adoption in EU. Useful for tracking narratives in German, French, and Spanish-speaking Mastodon instances.
+- [ ] **4chan/8kun** — Anonymous image boards. High noise but extremely valuable for tracking narrative origins before they surface on mainstream platforms. Requires aggressive filtering.
+- [ ] **Facebook Pages** — Meta Content Library access (academic/research only). Limited to approved researchers.
+- [ ] **TikTok** — Research API (academic access). Video content requires transcript extraction before text analysis.
+
+### Phase 5: Community & Production Readiness — Not Started
+
+Phase 5 is about making Criba deployable by anyone — journalists, NGOs, researchers, and civic organizations — without needing to read the source code.
+
+#### Documentation
+- [x] Contributor guide (`CONTRIBUTING.md`) — Covers plugin development, filter creation, project structure, and PR process.
+- [ ] **Deployment guide** — Step-by-step for non-technical users: VPS provisioning, Docker setup, Ollama model selection, `criba.yml` tuning, first data ingestion.
+- [ ] **Plugin authoring tutorial** — While `CONTRIBUTING.md` covers the interface, a standalone tutorial with a real-world example (e.g., building a Mastodon plugin from scratch) would lower the barrier for external contributors.
+- [ ] **API reference** — Auto-generated from FastAPI's OpenAPI spec, but needs a human-readable guide with authentication, pagination, filtering examples, and WebSocket protocol documentation.
+- [ ] **Architecture deep-dive** — How data flows from ingestion → filters → LLM → clustering → campaign detection. Useful for contributors modifying core logic.
+
+#### Pre-Built Configurations
+- [x] Colombia profile (current `criba.yml`) — Political channels, news RSS, relevant subreddits, Bluesky keywords.
+- [ ] **Brazil profile** — `criba.profiles/brazil.yml` with Portuguese sources.
+- [ ] **US profile** — `criba.profiles/us.yml` with English sources.
+- [ ] **Mexico profile** — `criba.profiles/mexico.yml` with Mexican sources.
+- [ ] **Profile installer** — CLI command (`criba init --profile=brazil`) that copies the right config, sets language/timezone defaults, and suggests relevant Ollama models.
+
+#### Academic Research Export
+Criba's data is valuable for computational social science, disinformation research, and media studies. Researchers need structured exports they can analyze in R, Python, or SPSS.
+- [ ] **CSV/TSV export** — Flat file export of posts, scores, and analysis results. Filterable by date range, source, campaign, narrative.
+- [ ] **JSON-LD export** — Structured, linked-data format for integration with academic knowledge graphs. Includes provenance metadata (when detected, confidence, methodology).
+- [ ] **GraphML / GEXF export** — Network graph exports (author interaction graph, narrative cluster graph) for analysis in Gephi, NetworkX, or igraph.
+- [ ] **Bibliographic metadata** — Attach dataset DOI, collection methodology, and citation information to exports so researchers can reference Criba datasets in publications.
+- [ ] **API endpoint** — `GET /api/export?format=csv&campaign={id}&from={date}&to={date}` for programmatic access.
+
+#### Production Hardening
+- [ ] **Authentication & authorization** — Currently the API has no auth. Need API key or OAuth2 layer for multi-user deployments.
+- [ ] **Rate limiting** — API rate limiting to prevent abuse on public-facing deployments.
+- [ ] **Data retention policies** — Configurable TTL for raw posts, embeddings, and analysis results. Old data should be archived or purged to manage disk usage on long-running deployments.
+- [ ] **Health checks & monitoring** — `/health` endpoint with dependency status (PostgreSQL, Redis, Ollama). Prometheus metrics for ingestion rate, queue depth, LLM latency, error rates.
+- [ ] **Backup & recovery** — PostgreSQL backup strategy, Redis persistence configuration, disaster recovery runbook.
+- [ ] **Kubernetes / Helm chart** — For organizations running Criba in cloud environments. Includes horizontal pod autoscaling for Celery workers based on queue depth.
+
+#### Dashboard Maturity
+- [ ] **Saved searches & filters** — Allow users to save filter presets (e.g., "show only Telegram posts with score > 0.8 from last 7 days").
+- [ ] **Scheduled reports** — Daily/weekly email or PDF digest summarizing detected campaigns, new narratives, and trending anomalies.
+- [ ] **Mobile-responsive layout** — Current dashboard targets desktop. Need responsive breakpoints for tablet/phone access in field deployments.
+- [ ] **Dark mode** — For extended monitoring sessions.
 
 ---
 

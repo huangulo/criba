@@ -3,10 +3,12 @@ import uuid
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from criba.api.schemas import (
+    BaselineSettings,
+    BaselineSettingsUpdate,
     CampaignInspectResponse,
     CampaignResponse,
     CopypastaPhrase,
@@ -17,6 +19,11 @@ from criba.api.schemas import (
     NotificationSettingsResponse,
     NotificationSettingsUpdate,
     PlatformBleedStep,
+    ProjectCreate,
+    ProjectResponse,
+    ProjectTargetInput,
+    ProjectTargetResponse,
+    RawPostLog,
     StatsSummary,
     TestAlertResponse,
 )
@@ -30,9 +37,30 @@ from criba.db.models import (
     NarrativePost,
     Post,
     PostEmbedding,
+    Project,
+    ProjectTarget,
+    SystemSetting,
 )
 
 logger = logging.getLogger(__name__)
+
+async def _get_setting(session: AsyncSession, key: str, default: str = "") -> str:
+    result = await session.execute(
+        select(SystemSetting).where(SystemSetting.key == key)
+    )
+    row = result.scalar_one_or_none()
+    return row.value if row else default
+
+
+async def _set_setting(session: AsyncSession, key: str, value: str) -> None:
+    result = await session.execute(
+        select(SystemSetting).where(SystemSetting.key == key)
+    )
+    row = result.scalar_one_or_none()
+    if row:
+        row.value = value
+    else:
+        session.add(SystemSetting(key=key, value=value))
 
 router = APIRouter(prefix="/api")
 
@@ -107,6 +135,37 @@ async def list_flagged_posts(
             recommended_action=analysis.recommended_action if analysis else None,
         )
         for post, score, analysis in rows
+    ]
+
+
+@router.get("/posts/log", response_model=list[RawPostLog])
+async def ingestion_log(
+    platform: str | None = Query(default=None),
+    max_score: float = Query(default=0.6, ge=0.0, le=1.0),
+    limit: int = Query(default=100, le=500),
+    session: AsyncSession = Depends(get_async_session),
+):
+    stmt = (
+        select(Post, HeuristicScore)
+        .join(HeuristicScore, Post.id == HeuristicScore.post_id)
+        .where(HeuristicScore.composite_score <= max_score)
+    )
+    if platform is not None:
+        stmt = stmt.where(Post.source == platform)
+    stmt = stmt.order_by(Post.published_at.desc()).limit(limit)
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    return [
+        RawPostLog(
+            id=post.id,
+            content=post.content,
+            platform=post.source,
+            author_handle=post.author_handle,
+            published_at=post.published_at,
+            composite_score=score.composite_score,
+        )
+        for post, score in rows
     ]
 
 
@@ -420,44 +479,169 @@ async def inspect_campaign(
 
 
 @router.get("/settings/notifications", response_model=NotificationSettingsResponse)
-async def get_notification_settings():
-    from criba.config import load_config
-    config = load_config()
-    n = config.notifications
-    return NotificationSettingsResponse(
-        slack_webhook_url=n.slack_webhook_url,
-        discord_webhook_url=n.discord_webhook_url,
-        telegram_bot_token=n.telegram_bot_token,
-        telegram_chat_id=n.telegram_chat_id,
-        confidence_threshold=n.confidence_threshold,
-    )
+async def get_notification_settings(
+    session: AsyncSession = Depends(get_async_session),
+):
+    keys = [
+        "slack_webhook_url", "discord_webhook_url",
+        "telegram_bot_token", "telegram_chat_id", "confidence_threshold",
+    ]
+    values = {}
+    for key in keys:
+        values[key] = await _get_setting(session, key, "")
+    values["confidence_threshold"] = float(values.get("confidence_threshold", "0.85") or "0.85")
+    return NotificationSettingsResponse(**values)
 
 
 @router.put("/settings/notifications", response_model=NotificationSettingsResponse)
 async def update_notification_settings(
     update: NotificationSettingsUpdate,
+    session: AsyncSession = Depends(get_async_session),
 ):
-    from criba.config import load_config, save_config
-    config = load_config()
-    n = config.notifications
-    if update.slack_webhook_url is not None:
-        n.slack_webhook_url = update.slack_webhook_url
-    if update.discord_webhook_url is not None:
-        n.discord_webhook_url = update.discord_webhook_url
-    if update.telegram_bot_token is not None:
-        n.telegram_bot_token = update.telegram_bot_token
-    if update.telegram_chat_id is not None:
-        n.telegram_chat_id = update.telegram_chat_id
-    if update.confidence_threshold is not None:
-        n.confidence_threshold = update.confidence_threshold
-    save_config(config)
-    return NotificationSettingsResponse(
-        slack_webhook_url=n.slack_webhook_url,
-        discord_webhook_url=n.discord_webhook_url,
-        telegram_bot_token=n.telegram_bot_token,
-        telegram_chat_id=n.telegram_chat_id,
-        confidence_threshold=n.confidence_threshold,
+    mapping = {
+        "slack_webhook_url": update.slack_webhook_url,
+        "discord_webhook_url": update.discord_webhook_url,
+        "telegram_bot_token": update.telegram_bot_token,
+        "telegram_chat_id": update.telegram_chat_id,
+        "confidence_threshold": (
+            str(update.confidence_threshold) if update.confidence_threshold is not None else None
+        ),
+    }
+    for key, value in mapping.items():
+        if value is not None:
+            await _set_setting(session, key, value)
+    await session.commit()
+
+    keys = [
+        "slack_webhook_url", "discord_webhook_url",
+        "telegram_bot_token", "telegram_chat_id", "confidence_threshold",
+    ]
+    values = {}
+    for key in keys:
+        values[key] = await _get_setting(session, key, "")
+    values["confidence_threshold"] = float(values.get("confidence_threshold", "0.85") or "0.85")
+    return NotificationSettingsResponse(**values)
+
+
+@router.get("/settings/baseline", response_model=BaselineSettings)
+async def get_baseline_settings(
+    session: AsyncSession = Depends(get_async_session),
+):
+    return BaselineSettings(
+        heuristic_threshold=float(await _get_setting(session, "heuristic_threshold", "0.6")),
+        copypasta_threshold=int(await _get_setting(session, "copypasta_threshold", "10")),
+        temporal_cluster_min=int(await _get_setting(session, "temporal_cluster_min", "5")),
+        new_account_days=int(await _get_setting(session, "new_account_days", "7")),
     )
+
+
+@router.put("/settings/baseline", response_model=BaselineSettings)
+async def update_baseline_settings(
+    update: BaselineSettingsUpdate,
+    session: AsyncSession = Depends(get_async_session),
+):
+    if update.heuristic_threshold is not None:
+        await _set_setting(session, "heuristic_threshold", str(update.heuristic_threshold))
+    if update.copypasta_threshold is not None:
+        await _set_setting(session, "copypasta_threshold", str(update.copypasta_threshold))
+    if update.temporal_cluster_min is not None:
+        await _set_setting(session, "temporal_cluster_min", str(update.temporal_cluster_min))
+    if update.new_account_days is not None:
+        await _set_setting(session, "new_account_days", str(update.new_account_days))
+    await session.commit()
+
+    return BaselineSettings(
+        heuristic_threshold=float(await _get_setting(session, "heuristic_threshold", "0.6")),
+        copypasta_threshold=int(await _get_setting(session, "copypasta_threshold", "10")),
+        temporal_cluster_min=int(await _get_setting(session, "temporal_cluster_min", "5")),
+        new_account_days=int(await _get_setting(session, "new_account_days", "7")),
+    )
+
+
+@router.get("/projects", response_model=list[ProjectResponse])
+async def list_projects(
+    session: AsyncSession = Depends(get_async_session),
+):
+    stmt = select(Project).order_by(Project.created_at.desc())
+    result = await session.execute(stmt)
+    projects = result.scalars().all()
+
+    response = []
+    for project in projects:
+        targets_stmt = select(ProjectTarget).where(ProjectTarget.project_id == project.id)
+        targets_result = await session.execute(targets_stmt)
+        targets = targets_result.scalars().all()
+        response.append(ProjectResponse(
+            id=project.id,
+            name=project.name,
+            description=project.description,
+            created_at=project.created_at,
+            targets=[
+                ProjectTargetResponse(
+                    id=t.id,
+                    platform=t.platform,
+                    target_type=t.target_type,
+                    value=t.value,
+                )
+                for t in targets
+            ],
+        ))
+    return response
+
+
+@router.post("/projects", response_model=ProjectResponse, status_code=201)
+async def create_project(
+    data: ProjectCreate,
+    session: AsyncSession = Depends(get_async_session),
+):
+    project = Project(
+        name=data.name,
+        description=data.description,
+    )
+    session.add(project)
+    await session.flush()
+
+    targets = []
+    for target_input in data.targets:
+        target = ProjectTarget(
+            project_id=project.id,
+            platform=target_input.platform,
+            target_type=target_input.target_type,
+            value=target_input.value,
+        )
+        session.add(target)
+        targets.append(target)
+    await session.commit()
+
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        description=project.description,
+        created_at=project.created_at,
+        targets=[
+            ProjectTargetResponse(
+                id=t.id,
+                platform=t.platform,
+                target_type=t.target_type,
+                value=t.value,
+            )
+            for t in targets
+        ],
+    )
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+):
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    await session.execute(delete(ProjectTarget).where(ProjectTarget.project_id == project_id))
+    await session.delete(project)
+    await session.commit()
 
 
 @router.post("/alerts/test/{channel}", response_model=TestAlertResponse)

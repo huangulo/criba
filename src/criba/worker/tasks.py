@@ -1,11 +1,9 @@
 import asyncio
 import logging
 import sys
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 from criba.celery_app import app
-from criba.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -21,26 +19,43 @@ def ingest_source(self, source_name: str) -> dict:
 
 async def _ingest_source_async(source_name: str) -> dict:
     from criba.db.connection import get_async_session_factory
-    from criba.db.models import AuthorGraph, HeuristicScore, Post
-    from criba.filters.scoring import create_pipeline
+    from criba.db.models import AuthorGraph, HeuristicScore, Post, ProjectTarget
+    from criba.filters.scoring import create_pipeline, get_heuristic_threshold
     from criba.plugins.registry import get_plugin
+    from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    config = load_config()
     plugin = get_plugin(source_name)
 
     if plugin is None:
         logger.error("No plugin found for source: %s", source_name)
         return {"error": f"no plugin for {source_name}"}
 
-    source_dataclass = getattr(config.sources, source_name, None)
+    session_factory = get_async_session_factory()
+    async with session_factory() as session:
+        # Query project_targets for this platform
+        targets_stmt = select(ProjectTarget).where(ProjectTarget.platform == source_name)
+        targets_result = await session.execute(targets_stmt)
+        targets = targets_result.scalars().all()
 
-    if source_dataclass is None or not getattr(source_dataclass, "enabled", False):
-        logger.info("Source %s is not enabled, skipping", source_name)
-        return {"error": f"source {source_name} not enabled"}
+    if not targets:
+        logger.info("No active targets for source %s, skipping", source_name)
+        return {"error": f"no targets for {source_name}"}
 
-    source_config = asdict(source_dataclass)
-    pipeline = create_pipeline()
+    # Build source_config from project_targets
+    # Each plugin expects different config keys based on target_type
+    channels = [t.value for t in targets if t.target_type == "handle"]
+    keywords = [t.value for t in targets if t.target_type == "keyword"]
+
+    source_config = {
+        "channels": channels,
+        "keywords": keywords,
+        "handles": channels,  # bluesky uses 'handles'
+        "poll_interval": 60,
+    }
+
+    threshold = await get_heuristic_threshold()
+    pipeline = create_pipeline(threshold=threshold)
 
     total = 0
     inserted = 0
@@ -81,7 +96,6 @@ async def _ingest_source_async(source_name: str) -> dict:
                 temporal = pipeline_result.filter_results.get("temporal_anomaly")
                 account_age = pipeline_result.filter_results.get("account_age")
 
-                from sqlalchemy import select
                 post_row = await session.execute(
                     select(Post.id).where(
                         Post.source == raw_post.source,

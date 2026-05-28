@@ -1,11 +1,9 @@
 import asyncio
-import json
 import logging
 
 import httpx
 
 from criba.celery_app import app
-from criba.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -102,21 +100,42 @@ async def _send_telegram(bot_token: str, chat_id: str, msg: dict) -> bool:
         return False
 
 
+async def _get_notification_settings() -> dict[str, str]:
+    """Fetch notification settings from system_settings table."""
+    from sqlalchemy import select
+    from criba.db.connection import get_async_session_factory
+    from criba.db.models import SystemSetting
+
+    keys = [
+        "slack_webhook_url", "discord_webhook_url",
+        "telegram_bot_token", "telegram_chat_id", "confidence_threshold",
+    ]
+    settings = {}
+    session_factory = get_async_session_factory()
+    async with session_factory() as session:
+        for key in keys:
+            result = await session.execute(
+                select(SystemSetting.value).where(SystemSetting.key == key)
+            )
+            row = result.scalar_one_or_none()
+            settings[key] = row or ""
+    return settings
+
+
 async def _send_campaign_alert_async(campaign_data: dict) -> dict:
-    config = load_config()
-    notif = config.notifications
+    notif = await _get_notification_settings()
     msg = _build_message(campaign_data)
     msg["timestamp"] = campaign_data.get("detected_at", "")
 
     results = {}
 
-    if notif.slack_webhook_url:
-        results["slack"] = await _send_slack(notif.slack_webhook_url, msg)
-    if notif.discord_webhook_url:
-        results["discord"] = await _send_discord(notif.discord_webhook_url, msg)
-    if notif.telegram_bot_token and notif.telegram_chat_id:
+    if notif.get("slack_webhook_url"):
+        results["slack"] = await _send_slack(notif["slack_webhook_url"], msg)
+    if notif.get("discord_webhook_url"):
+        results["discord"] = await _send_discord(notif["discord_webhook_url"], msg)
+    if notif.get("telegram_bot_token") and notif.get("telegram_chat_id"):
         results["telegram"] = await _send_telegram(
-            notif.telegram_bot_token, notif.telegram_chat_id, msg
+            notif["telegram_bot_token"], notif["telegram_chat_id"], msg
         )
 
     if not results:
@@ -135,8 +154,7 @@ def send_campaign_alert(self, campaign_data: dict) -> dict:
 
 
 async def send_test_alert(channel: str) -> dict:
-    config = load_config()
-    notif = config.notifications
+    notif = await _get_notification_settings()
 
     test_msg = {
         "label": "Criba Test Alert",
@@ -149,14 +167,14 @@ async def send_test_alert(channel: str) -> dict:
         "timestamp": "",
     }
 
-    if channel == "slack" and notif.slack_webhook_url:
-        success = await _send_slack(notif.slack_webhook_url, test_msg)
+    if channel == "slack" and notif.get("slack_webhook_url"):
+        success = await _send_slack(notif["slack_webhook_url"], test_msg)
         return {"channel": "slack", "success": success}
-    elif channel == "discord" and notif.discord_webhook_url:
-        success = await _send_discord(notif.discord_webhook_url, test_msg)
+    elif channel == "discord" and notif.get("discord_webhook_url"):
+        success = await _send_discord(notif["discord_webhook_url"], test_msg)
         return {"channel": "discord", "success": success}
-    elif channel == "telegram" and notif.telegram_bot_token and notif.telegram_chat_id:
-        success = await _send_telegram(notif.telegram_bot_token, notif.telegram_chat_id, test_msg)
+    elif channel == "telegram" and notif.get("telegram_bot_token") and notif.get("telegram_chat_id"):
+        success = await _send_telegram(notif["telegram_bot_token"], notif["telegram_chat_id"], test_msg)
         return {"channel": "telegram", "success": success}
     else:
         return {"channel": channel, "success": False, "error": "Channel not configured"}

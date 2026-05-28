@@ -2,7 +2,6 @@ import asyncio
 import logging
 
 from criba.celery_app import app
-from criba.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +113,7 @@ async def _detect_campaigns_async() -> dict:
     from sqlalchemy import select
     from criba.db.connection import get_async_session_factory
     from criba.engine.narrative import NarrativeEngine
-    from criba.db.models import Campaign
+    from criba.db.models import Campaign, SystemSetting
 
     session_factory = get_async_session_factory()
 
@@ -136,8 +135,12 @@ async def _detect_campaigns_async() -> dict:
             new_ids = all_ids - existing_ids
 
             if new_ids:
-                config = load_config()
-                threshold = config.notifications.confidence_threshold
+                _sess_factory = get_async_session_factory()
+                async with _sess_factory() as _session:
+                    _result = await _session.execute(
+                        select(SystemSetting.value).where(SystemSetting.key == "confidence_threshold")
+                    )
+                    threshold = float(_result.scalar_one_or_none() or "0.85")
 
                 for campaign_id in new_ids:
                     campaign = await session.get(Campaign, campaign_id)

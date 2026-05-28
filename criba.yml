@@ -2,52 +2,25 @@ general:
   language: es
   timezone: America/Bogota
   heuristic_threshold: 0.6
+
 ollama:
-  host: http://localhost:11434
+  host: http://host.docker.internal:11434
   model: qwen3.5:9b
   timeout: 30
+
 sources:
   telegram:
     enabled: true
-    channels:
-    - '@noscogiolanochenoticias'
-    - '@CanalRed_TV'
-    - '@infopresidencia'
     poll_interval: 60
   reddit:
     enabled: true
-    subreddits:
-    - Colombia
     poll_interval: 120
   rss:
     enabled: true
-    feeds:
-    - name: El Tiempo
-      url: https://www.eltiempo.com/rss/politica.xml
-    - name: El Espectador
-      url: https://www.elespectador.com/arc/outboundfeeds/discover/?outputType=xml
-    - name: KienyKe
-      url: https://kienyke.com/feed
     poll_interval: 300
   bluesky:
     enabled: true
-    keywords:
-    - Colombia
-    - elecciones
-    handles:
-    - presidencia.bsky.social
     poll_interval: 120
   youtube:
     enabled: true
-    channels: []
-    poll_interval: 300
-alerts:
-  copypasta_threshold: 10
-  temporal_cluster_min: 5
-  new_account_days: 7
-notifications:
-  slack_webhook_url: ''
-  discord_webhook_url: ''
-  telegram_bot_token: ''
-  telegram_chat_id: ''
-  confidence_threshold: 0.85
+    poll_interval: 900

@@ -143,3 +143,53 @@ class TestAlertResponse(BaseModel):
     channel: str
     success: bool
     error: str | None = None
+
+
+class RawPostLog(BaseModel):
+    id: uuid.UUID
+    content: str
+    platform: str
+    author_handle: str | None
+    published_at: datetime
+    composite_score: float | None
+
+
+class BaselineSettings(BaseModel):
+    heuristic_threshold: float
+    copypasta_threshold: int
+    temporal_cluster_min: int
+    new_account_days: int
+
+
+class BaselineSettingsUpdate(BaseModel):
+    heuristic_threshold: float | None = None
+    copypasta_threshold: int | None = None
+    temporal_cluster_min: int | None = None
+    new_account_days: int | None = None
+
+
+class ProjectTargetInput(BaseModel):
+    platform: str
+    target_type: str  # 'keyword' or 'handle'
+    value: str
+
+
+class ProjectTargetResponse(BaseModel):
+    id: uuid.UUID
+    platform: str
+    target_type: str
+    value: str
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    description: str = ""
+    targets: list[ProjectTargetInput] = []
+
+
+class ProjectResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str
+    created_at: datetime
+    targets: list[ProjectTargetResponse]
