@@ -52,20 +52,22 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
 }
 
 interface NarrativeMapProps {
+  projectId: string;
   onSelectNarrative?: (id: string, label: string | null) => void;
 }
 
 export default function NarrativeMap({
+  projectId,
   onSelectNarrative,
 }: NarrativeMapProps) {
   const [narratives, setNarratives] = useState<Narrative[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    fetchNarratives()
+    fetchNarratives(projectId)
       .then(setNarratives)
       .catch((err) => setError(err.message));
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     load();

@@ -56,10 +56,11 @@ function identityColor(ratio: number): string {
 
 interface CampaignInspectorProps {
   campaignId: string | null;
+  projectId: string;
   onClose: () => void;
 }
 
-export default function CampaignInspector({ campaignId, onClose }: CampaignInspectorProps) {
+export default function CampaignInspector({ campaignId, projectId, onClose }: CampaignInspectorProps) {
   const [data, setData] = useState<CampaignInspectData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -67,10 +68,10 @@ export default function CampaignInspector({ campaignId, onClose }: CampaignInspe
   const load = useCallback(() => {
     if (!campaignId) return;
     setError(null);
-    fetchCampaignInspect(campaignId)
+    fetchCampaignInspect(campaignId, projectId)
       .then(setData)
       .catch((err) => setError(err.message));
-  }, [campaignId]);
+  }, [campaignId, projectId]);
 
   useEffect(() => {
     if (!campaignId) {

@@ -40,9 +40,10 @@ interface PendingTarget {
 interface ProjectConsoleProps {
   open: boolean;
   onClose: () => void;
+  onProjectsChange?: () => void;
 }
 
-export default function ProjectConsole({ open, onClose }: ProjectConsoleProps) {
+export default function ProjectConsole({ open, onClose, onProjectsChange }: ProjectConsoleProps) {
   const [activeTab, setActiveTab] = useState<Tab>("baseline");
 
   const [baseline, setBaseline] = useState<BaselineSettings>({
@@ -140,6 +141,7 @@ export default function ProjectConsole({ open, onClose }: ProjectConsoleProps) {
         setProjectDesc("");
         setPendingTargets([]);
         loadProjects();
+        onProjectsChange?.();
       })
       .catch(() => {})
       .finally(() => setCreating(false));
@@ -147,7 +149,10 @@ export default function ProjectConsole({ open, onClose }: ProjectConsoleProps) {
 
   const handleDeleteProject = (id: string) => {
     deleteProject(id)
-      .then(() => setProjects((prev) => prev.filter((p) => p.id !== id)))
+      .then(() => {
+        setProjects((prev) => prev.filter((p) => p.id !== id));
+        onProjectsChange?.();
+      })
       .catch(() => {});
   };
 

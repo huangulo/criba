@@ -28,15 +28,16 @@ function platformPillColor(platform: string): string {
 }
 
 interface CampaignListProps {
+  projectId: string;
   onSelectCampaign?: (id: string) => void;
 }
 
-export default function CampaignList({ onSelectCampaign }: CampaignListProps) {
+export default function CampaignList({ projectId, onSelectCampaign }: CampaignListProps) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    fetchCampaigns()
+    fetchCampaigns(projectId)
       .then((data) => {
         const sorted = [...data].sort((a, b) => {
           const ca = a.confidence ?? 0;
@@ -46,7 +47,7 @@ export default function CampaignList({ onSelectCampaign }: CampaignListProps) {
         setCampaigns(sorted);
       })
       .catch((err) => setError(err.message));
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     load();

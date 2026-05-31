@@ -48,26 +48,26 @@ export interface AlertMessage {
   data: Record<string, unknown>;
 }
 
-export async function fetchNarratives(): Promise<Narrative[]> {
-  const res = await fetch(`${API_BASE}/api/narratives`);
+export async function fetchNarratives(projectId: string): Promise<Narrative[]> {
+  const res = await fetch(`${API_BASE}/api/narratives?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch narratives");
   return res.json();
 }
 
-export async function fetchCampaigns(): Promise<Campaign[]> {
-  const res = await fetch(`${API_BASE}/api/campaigns`);
+export async function fetchCampaigns(projectId: string): Promise<Campaign[]> {
+  const res = await fetch(`${API_BASE}/api/campaigns?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch campaigns");
   return res.json();
 }
 
-export async function fetchFlaggedPosts(): Promise<FlaggedPost[]> {
-  const res = await fetch(`${API_BASE}/api/posts/flagged`);
+export async function fetchFlaggedPosts(projectId: string): Promise<FlaggedPost[]> {
+  const res = await fetch(`${API_BASE}/api/posts/flagged?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch flagged posts");
   return res.json();
 }
 
-export async function fetchStats(): Promise<StatsSummary> {
-  const res = await fetch(`${API_BASE}/api/stats/summary`);
+export async function fetchStats(projectId: string): Promise<StatsSummary> {
+  const res = await fetch(`${API_BASE}/api/stats/summary?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch stats");
   return res.json();
 }
@@ -103,8 +103,8 @@ export interface NetworkGraphData {
   total_interactions: number;
 }
 
-export async function fetchNetworkGraph(narrativeId: string): Promise<NetworkGraphData> {
-  const res = await fetch(`${API_BASE}/api/network/${narrativeId}`);
+export async function fetchNetworkGraph(narrativeId: string, projectId: string): Promise<NetworkGraphData> {
+  const res = await fetch(`${API_BASE}/api/network/${narrativeId}?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch network graph");
   return res.json();
 }
@@ -151,8 +151,8 @@ export interface CampaignInspectData {
   evidence_summary: string;
 }
 
-export async function fetchCampaignInspect(campaignId: string): Promise<CampaignInspectData> {
-  const res = await fetch(`${API_BASE}/api/campaigns/${campaignId}/inspect`);
+export async function fetchCampaignInspect(campaignId: string, projectId: string): Promise<CampaignInspectData> {
+  const res = await fetch(`${API_BASE}/api/campaigns/${campaignId}/inspect?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch campaign inspection");
   return res.json();
 }
@@ -215,14 +215,16 @@ export interface IngestionLogFilters {
 }
 
 export async function fetchIngestionLogs(
+  projectId: string,
   filters: IngestionLogFilters = {},
 ): Promise<IngestionLogPost[]> {
   const params = new URLSearchParams();
+  params.set("project_id", projectId);
   if (filters.platform) params.set("platform", filters.platform);
   if (filters.max_score !== undefined) params.set("max_score", String(filters.max_score));
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   const qs = params.toString();
-  const res = await fetch(`${API_BASE}/api/posts/log${qs ? `?${qs}` : ""}`);
+  const res = await fetch(`${API_BASE}/api/posts/log?${qs}`);
   if (!res.ok) throw new Error("Failed to fetch ingestion logs");
   return res.json();
 }

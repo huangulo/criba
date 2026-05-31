@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, Boolean, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -29,11 +29,33 @@ class Post(Base):
     mentions: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     reply_to: Mapped[str | None] = mapped_column(String(255))
     raw_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     ingested_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    __table_args__ = (UniqueConstraint("source", "source_id"),)
+    project = relationship("Project", back_populates="posts")
+    ground_truth = relationship("GroundTruth", back_populates="post", uselist=False, cascade="all, delete-orphan")
+
+    __table_args__ = (UniqueConstraint("source", "source_id", "project_id"),)
+
+
+class GroundTruth(Base):
+    __tablename__ = "ground_truth"
+
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    label: Mapped[str] = mapped_column(String(20), nullable=False)
+    labeled_by: Mapped[str] = mapped_column(String(100), nullable=False, default="manual")
+    notes: Mapped[str | None] = mapped_column(Text)
+    labeled_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    post = relationship("Post", back_populates="ground_truth")
 
 
 class HeuristicScore(Base):
@@ -79,7 +101,12 @@ class Narrative(Base):
     post_count: Mapped[int] = mapped_column(Integer, default=0)
     platform_spread: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(50), default="active")
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     embedding = mapped_column(Vector(768), nullable=True)
+
+    project = relationship("Project", back_populates="narratives")
 
 
 class NarrativePost(Base):
@@ -118,7 +145,12 @@ class Campaign(Base):
     account_count: Mapped[int | None] = mapped_column(Integer)
     post_count: Mapped[int | None] = mapped_column(Integer)
     platforms: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(50), default="active")
+
+    project = relationship("Project", back_populates="campaigns")
 
 
 class PostEmbedding(Base):
@@ -143,6 +175,10 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+    posts = relationship("Post", back_populates="project", cascade="all, delete-orphan")
+    narratives = relationship("Narrative", back_populates="project", cascade="all, delete-orphan")
+    campaigns = relationship("Campaign", back_populates="project", cascade="all, delete-orphan")
 
 
 class ProjectTarget(Base):

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Settings, Radio, FolderKanban } from "lucide-react";
 import StatsSummary from "@/components/StatsSummary";
 import NarrativeMap from "@/components/NarrativeMap";
@@ -11,8 +11,11 @@ import CampaignInspector from "@/components/CampaignInspector";
 import AlertSettings from "@/components/AlertSettings";
 import IngestionLog from "@/components/IngestionLog";
 import ProjectConsole from "@/components/ProjectConsole";
+import { fetchProjects, type Project } from "@/lib/api";
 
 export default function Home() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [selectedNarrativeId, setSelectedNarrativeId] = useState<string | null>(
     null,
   );
@@ -25,6 +28,24 @@ export default function Home() {
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [ingestionLogOpen, setIngestionLogOpen] = useState(false);
   const [projectConsoleOpen, setProjectConsoleOpen] = useState(false);
+
+  useEffect(() => {
+    fetchProjects().then((data) => {
+      setProjects(data);
+      if (data.length > 0) {
+        setActiveProjectId(data[0].id);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const refreshProjects = () => {
+    fetchProjects().then((data) => {
+      setProjects(data);
+      if (activeProjectId && !data.find((p) => p.id === activeProjectId)) {
+        setActiveProjectId(data.length > 0 ? data[0].id : null);
+      }
+    }).catch(() => {});
+  };
 
   const handleSelectNarrative = (id: string, label: string | null) => {
     setSelectedNarrativeId(id);
@@ -40,6 +61,19 @@ export default function Home() {
             <span className="text-xs text-text-muted font-mono">
               Narrative Intelligence
             </span>
+            {projects.length > 0 && activeProjectId && (
+              <select
+                value={activeProjectId}
+                onChange={(e) => setActiveProjectId(e.target.value)}
+                className="ml-3 rounded border border-surface-border bg-surface-card px-3 py-1 text-xs font-mono text-text-primary focus:outline-none focus:border-info"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <LiveAlerts />
@@ -71,23 +105,33 @@ export default function Home() {
       </header>
 
       <div className="p-6 space-y-6">
-        <StatsSummary />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <NarrativeMap onSelectNarrative={handleSelectNarrative} />
-          <CampaignList onSelectCampaign={setSelectedCampaignId} />
-        </div>
-        <NetworkGraph
-          narrativeId={selectedNarrativeId}
-          narrativeLabel={selectedNarrativeLabel}
-        />
+        {activeProjectId ? (
+          <>
+            <StatsSummary projectId={activeProjectId} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <NarrativeMap projectId={activeProjectId} onSelectNarrative={handleSelectNarrative} />
+              <CampaignList projectId={activeProjectId} onSelectCampaign={setSelectedCampaignId} />
+            </div>
+            <NetworkGraph
+              narrativeId={selectedNarrativeId}
+              narrativeLabel={selectedNarrativeLabel}
+              projectId={activeProjectId}
+            />
+          </>
+        ) : (
+          <div className="flex items-center justify-center py-20 text-text-muted text-sm font-mono">
+            No projects configured. Create a project in the Projects console to begin monitoring.
+          </div>
+        )}
       </div>
       <CampaignInspector
         campaignId={selectedCampaignId}
+        projectId={activeProjectId ?? ""}
         onClose={() => setSelectedCampaignId(null)}
       />
       <AlertSettings open={alertSettingsOpen} onClose={() => setAlertSettingsOpen(false)} />
-      <IngestionLog open={ingestionLogOpen} onClose={() => setIngestionLogOpen(false)} />
-      <ProjectConsole open={projectConsoleOpen} onClose={() => setProjectConsoleOpen(false)} />
+      <IngestionLog projectId={activeProjectId ?? ""} open={ingestionLogOpen} onClose={() => setIngestionLogOpen(false)} />
+      <ProjectConsole open={projectConsoleOpen} onClose={() => setProjectConsoleOpen(false)} onProjectsChange={refreshProjects} />
     </main>
   );
 }

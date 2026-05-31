@@ -18,13 +18,14 @@ class NarrativeEngine:
         self._session = session
         self._threshold = similarity_threshold
 
-    async def cluster_posts(self, limit: int = 200) -> dict:
+    async def cluster_posts(self, project_id: uuid.UUID, limit: int = 200) -> dict:
         clustered_post_ids = select(NarrativePost.post_id)
         stmt = (
             select(Post, LlmAnalysis, PostEmbedding)
             .join(LlmAnalysis, Post.id == LlmAnalysis.post_id)
             .join(PostEmbedding, Post.id == PostEmbedding.post_id)
             .where(Post.id.notin_(clustered_post_ids))
+            .where(Post.project_id == project_id)
             .order_by(Post.published_at.desc())
             .limit(limit)
         )
@@ -40,10 +41,10 @@ class NarrativeEngine:
         updated_narratives = 0
 
         for post, analysis, embedding in rows:
-            best_narrative = await self._find_matching_narrative(embedding.embedding)
+            best_narrative = await self._find_matching_narrative(embedding.embedding, project_id)
 
             if best_narrative is None:
-                best_narrative = await self._create_narrative(post, analysis, embedding)
+                best_narrative = await self._create_narrative(post, analysis, embedding, project_id)
                 new_narratives += 1
             else:
                 await self._update_narrative(best_narrative, post, analysis, embedding)
@@ -63,7 +64,7 @@ class NarrativeEngine:
         )
         return {"clustered": clustered, "new_narratives": new_narratives, "updated_narratives": updated_narratives}
 
-    async def _find_matching_narrative(self, embedding: list[float]) -> Narrative | None:
+    async def _find_matching_narrative(self, embedding: list[float], project_id: uuid.UUID) -> Narrative | None:
         from pgvector.sqlalchemy import Vector
 
         max_distance = 1.0 - self._threshold
@@ -72,6 +73,7 @@ class NarrativeEngine:
             select(Narrative)
             .where(Narrative.embedding.isnot(None))
             .where(Narrative.status == "active")
+            .where(Narrative.project_id == project_id)
             .order_by(Narrative.embedding.cosine_distance(embedding))
             .limit(1)
         )
@@ -89,7 +91,7 @@ class NarrativeEngine:
             return candidate
         return None
 
-    async def _create_narrative(self, post: Post, analysis: LlmAnalysis, embedding: PostEmbedding) -> Narrative:
+    async def _create_narrative(self, post: Post, analysis: LlmAnalysis, embedding: PostEmbedding, project_id: uuid.UUID) -> Narrative:
         label = self._derive_label(analysis)
         narrative = Narrative(
             id=uuid.uuid4(),
@@ -100,6 +102,7 @@ class NarrativeEngine:
             platform_spread=1,
             status="active",
             embedding=embedding.embedding,
+            project_id=project_id,
         )
         self._session.add(narrative)
         await self._session.commit()
@@ -136,7 +139,7 @@ class NarrativeEngine:
             return f"{analysis.narrative_category.replace('_', ' ').title()} narrative"
         return "Unnamed narrative"
 
-    async def detect_campaigns(self) -> dict:
+    async def detect_campaigns(self, project_id: uuid.UUID) -> dict:
         existing_campaign_narratives = select(Campaign.id)
 
         stmt = (
@@ -144,6 +147,7 @@ class NarrativeEngine:
             .where(Narrative.status == "active")
             .where(Narrative.post_count > 20)
             .where(Narrative.platform_spread >= 2)
+            .where(Narrative.project_id == project_id)
         )
         result = await self._session.execute(stmt)
         candidates = result.all()
@@ -165,7 +169,7 @@ class NarrativeEngine:
                 continue
 
             existing = await self._session.execute(
-                select(Campaign).where(Campaign.label == narrative.label).where(Campaign.status == "active")
+                select(Campaign).where(Campaign.label == narrative.label).where(Campaign.status == "active").where(Campaign.project_id == project_id)
             )
             if existing.scalar_one_or_none() is not None:
                 skipped += 1
@@ -208,6 +212,7 @@ class NarrativeEngine:
                 post_count=total_posts,
                 platforms=platforms,
                 status="active",
+                project_id=project_id,
             )
             self._session.add(campaign)
             await self._session.commit()

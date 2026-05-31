@@ -38,10 +38,13 @@ services:
       - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      TELEGRAM_SESSION_PATH: /app/telegram_session
     command: celery -A criba.celery_app worker -l info
     volumes:
       - ./criba.yml:/app/criba.yml
       - ./criba.yml:/usr/local/lib/python3.12/criba.yml
+      - ./telegram_session.session:/app/telegram_session.session
     restart: unless-stopped
 
   beat:

@@ -67,6 +67,7 @@ router = APIRouter(prefix="/api")
 
 @router.get("/narratives", response_model=list[NarrativeResponse])
 async def list_narratives(
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
     status: str = Query(default="active"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
@@ -74,6 +75,7 @@ async def list_narratives(
 ):
     stmt = (
         select(Narrative)
+        .where(Narrative.project_id == project_id)
         .where(Narrative.status == status)
         .order_by(Narrative.post_count.desc(), Narrative.last_seen.desc())
         .offset(offset)
@@ -86,6 +88,7 @@ async def list_narratives(
 
 @router.get("/campaigns", response_model=list[CampaignResponse])
 async def list_campaigns(
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
     status: str = Query(default="active"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
@@ -93,6 +96,7 @@ async def list_campaigns(
 ):
     stmt = (
         select(Campaign)
+        .where(Campaign.project_id == project_id)
         .where(Campaign.status == status)
         .order_by(Campaign.confidence.desc(), Campaign.detected_at.desc())
         .offset(offset)
@@ -105,6 +109,7 @@ async def list_campaigns(
 
 @router.get("/posts/flagged", response_model=list[FlaggedPostResponse])
 async def list_flagged_posts(
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     min_score: float = Query(default=0.6, ge=0.0, le=1.0),
@@ -115,6 +120,7 @@ async def list_flagged_posts(
         .join(HeuristicScore, Post.id == HeuristicScore.post_id)
         .outerjoin(LlmAnalysis, Post.id == LlmAnalysis.post_id)
         .where(HeuristicScore.composite_score >= min_score)
+        .where(Post.project_id == project_id)
         .order_by(HeuristicScore.composite_score.desc())
         .offset(offset)
         .limit(limit)
@@ -140,6 +146,7 @@ async def list_flagged_posts(
 
 @router.get("/posts/log", response_model=list[RawPostLog])
 async def ingestion_log(
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
     platform: str | None = Query(default=None),
     max_score: float = Query(default=0.6, ge=0.0, le=1.0),
     limit: int = Query(default=100, le=500),
@@ -149,6 +156,7 @@ async def ingestion_log(
         select(Post, HeuristicScore)
         .join(HeuristicScore, Post.id == HeuristicScore.post_id)
         .where(HeuristicScore.composite_score <= max_score)
+        .where(Post.project_id == project_id)
     )
     if platform is not None:
         stmt = stmt.where(Post.source == platform)
@@ -170,21 +178,51 @@ async def ingestion_log(
 
 
 @router.get("/stats/summary", response_model=StatsSummary)
-async def stats_summary(session: AsyncSession = Depends(get_async_session)):
-    total_posts = (await session.execute(select(func.count(Post.id)))).scalar_one()
-    flagged_posts = (
+async def stats_summary(
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
+    session: AsyncSession = Depends(get_async_session),
+):
+    total_posts = (
         await session.execute(
-            select(func.count(HeuristicScore.post_id)).where(HeuristicScore.sent_to_llm == True)
+            select(func.count(Post.id)).where(Post.project_id == project_id)
         )
     ).scalar_one()
-    analyzed_posts = (await session.execute(select(func.count(LlmAnalysis.post_id)))).scalar_one()
+    flagged_posts = (
+        await session.execute(
+            select(func.count(HeuristicScore.post_id))
+            .join(Post, HeuristicScore.post_id == Post.id)
+            .where(Post.project_id == project_id)
+            .where(HeuristicScore.sent_to_llm == True)
+        )
+    ).scalar_one()
+    analyzed_posts = (
+        await session.execute(
+            select(func.count(LlmAnalysis.post_id))
+            .join(Post, LlmAnalysis.post_id == Post.id)
+            .where(Post.project_id == project_id)
+        )
+    ).scalar_one()
     active_narratives = (
-        await session.execute(select(func.count(Narrative.id)).where(Narrative.status == "active"))
+        await session.execute(
+            select(func.count(Narrative.id))
+            .where(Narrative.status == "active")
+            .where(Narrative.project_id == project_id)
+        )
     ).scalar_one()
     active_campaigns = (
-        await session.execute(select(func.count(Campaign.id)).where(Campaign.status == "active"))
+        await session.execute(
+            select(func.count(Campaign.id))
+            .where(Campaign.status == "active")
+            .where(Campaign.project_id == project_id)
+        )
     ).scalar_one()
-    clustered_posts = (await session.execute(select(func.count(NarrativePost.post_id)))).scalar_one()
+    clustered_posts = (
+        await session.execute(
+            select(func.count(NarrativePost.post_id))
+            .join(Post, NarrativePost.post_id == Post.id)
+            .where(Post.project_id == project_id)
+        )
+    ).scalar_one()
 
     return StatsSummary(
         total_posts=total_posts,
@@ -199,10 +237,11 @@ async def stats_summary(session: AsyncSession = Depends(get_async_session)):
 @router.get("/network/{narrative_id}", response_model=NetworkGraphResponse)
 async def get_network(
     narrative_id: uuid.UUID,
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
     session: AsyncSession = Depends(get_async_session),
 ):
     narrative = await session.get(Narrative, narrative_id)
-    if narrative is None:
+    if narrative is None or narrative.project_id != project_id:
         raise HTTPException(status_code=404, detail="Narrative not found")
 
     stmt = (
@@ -315,13 +354,20 @@ async def get_network(
 @router.get("/campaigns/{campaign_id}/inspect", response_model=CampaignInspectResponse)
 async def inspect_campaign(
     campaign_id: uuid.UUID,
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
     session: AsyncSession = Depends(get_async_session),
 ):
     campaign = await session.get(Campaign, campaign_id)
-    if campaign is None:
+    if campaign is None or campaign.project_id != project_id:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    narrative_stmt = select(Narrative).where(Narrative.label == campaign.label).where(Narrative.status == "active").limit(1)
+    narrative_stmt = (
+        select(Narrative)
+        .where(Narrative.label == campaign.label)
+        .where(Narrative.status == "active")
+        .where(Narrative.project_id == project_id)
+        .limit(1)
+    )
     narrative_result = await session.execute(narrative_stmt)
     narrative = narrative_result.scalar_one_or_none()
 

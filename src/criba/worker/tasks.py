@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from criba.celery_app import app
@@ -33,7 +34,6 @@ async def _ingest_source_async(source_name: str) -> dict:
 
     session_factory = get_async_session_factory()
     async with session_factory() as session:
-        # Query project_targets for this platform
         targets_stmt = select(ProjectTarget).where(ProjectTarget.platform == source_name)
         targets_result = await session.execute(targets_stmt)
         targets = targets_result.scalars().all()
@@ -42,17 +42,9 @@ async def _ingest_source_async(source_name: str) -> dict:
         logger.info("No active targets for source %s, skipping", source_name)
         return {"error": f"no targets for {source_name}"}
 
-    # Build source_config from project_targets
-    # Each plugin expects different config keys based on target_type
-    channels = [t.value for t in targets if t.target_type == "handle"]
-    keywords = [t.value for t in targets if t.target_type == "keyword"]
-
-    source_config = {
-        "channels": channels,
-        "keywords": keywords,
-        "handles": channels,  # bluesky uses 'handles'
-        "poll_interval": 60,
-    }
+    targets_by_project: dict = defaultdict(list)
+    for t in targets:
+        targets_by_project[t.project_id].append(t)
 
     threshold = await get_heuristic_threshold()
     pipeline = create_pipeline(threshold=threshold)
@@ -62,85 +54,128 @@ async def _ingest_source_async(source_name: str) -> dict:
     duplicates = 0
     flagged_for_llm = 0
 
-    session_factory = get_async_session_factory()
-    async with session_factory() as session:
-        async for raw_post in plugin.stream(source_config):
-            total += 1
+    for project_id, project_targets in targets_by_project.items():
+        channels = [t.value for t in project_targets if t.target_type == "handle"]
+        keywords = [t.value for t in project_targets if t.target_type == "keyword"]
 
-            stmt = pg_insert(Post).values(
-                source=raw_post.source,
-                source_id=raw_post.source_id,
-                author_id=raw_post.author_id,
-                author_handle=raw_post.author_handle,
-                author_created=raw_post.author_created_at,
-                content=raw_post.content,
-                language=raw_post.language,
-                published_at=raw_post.published_at,
-                url=raw_post.url,
-                engagement=raw_post.engagement,
-                hashtags=raw_post.hashtags,
-                mentions=raw_post.mentions,
-                reply_to=raw_post.reply_to,
-                raw_metadata=raw_post.raw_metadata,
-            )
-            stmt = stmt.on_conflict_do_nothing(index_elements=["source", "source_id"])
-            result = await session.execute(stmt)
-            await session.commit()
+        if source_name == "rss":
+            source_config = {
+                "feeds": [
+                    {
+                        "name": url.split("//")[1].split("/")[0] if "//" in url else url,
+                        "url": url,
+                    }
+                    for url in keywords
+                ],
+                "poll_interval": 60,
+            }
+        elif source_name == "reddit":
+            source_config = {
+                "subreddits": channels + keywords,
+                "poll_interval": 60,
+            }
+        elif source_name == "bluesky":
+            source_config = {
+                "keywords": keywords,
+                "handles": channels,
+                "poll_interval": 60,
+            }
+        elif source_name in ("telegram", "youtube"):
+            source_config = {
+                "channels": channels,
+                "poll_interval": 60,
+            }
+        else:
+            source_config = {
+                "channels": channels,
+                "keywords": keywords,
+                "poll_interval": 60,
+            }
 
-            if result.rowcount > 0:
-                inserted += 1
+        logger.info("Ingesting %s for project %s", source_name, project_id)
+        session_factory = get_async_session_factory()
+        async with session_factory() as session:
+            async for raw_post in plugin.stream(source_config):
+                total += 1
 
-                pipeline_result = await pipeline.run(raw_post)
-
-                copypasta_score = pipeline_result.filter_results.get("copypasta")
-                temporal = pipeline_result.filter_results.get("temporal_anomaly")
-                account_age = pipeline_result.filter_results.get("account_age")
-
-                post_row = await session.execute(
-                    select(Post.id).where(
-                        Post.source == raw_post.source,
-                        Post.source_id == raw_post.source_id,
-                    )
+                stmt = pg_insert(Post).values(
+                    source=raw_post.source,
+                    source_id=raw_post.source_id,
+                    author_id=raw_post.author_id,
+                    author_handle=raw_post.author_handle,
+                    author_created=raw_post.author_created_at,
+                    content=raw_post.content,
+                    language=raw_post.language,
+                    published_at=raw_post.published_at,
+                    url=raw_post.url,
+                    engagement=raw_post.engagement,
+                    hashtags=raw_post.hashtags,
+                    mentions=raw_post.mentions,
+                    reply_to=raw_post.reply_to,
+                    raw_metadata=raw_post.raw_metadata,
+                    project_id=project_id,
                 )
-                post_id = post_row.scalar_one_or_none()
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=["source", "source_id", "project_id"]
+                )
+                result = await session.execute(stmt)
+                await session.commit()
 
-                if post_id:
-                    score_stmt = pg_insert(HeuristicScore).values(
-                        post_id=post_id,
-                        copypasta_score=copypasta_score.score if copypasta_score else 0.0,
-                        temporal_anomaly=temporal.score if temporal else 0.0,
-                        account_age_flag=account_age.score if account_age else 0.0,
-                        composite_score=pipeline_result.composite_score,
-                        sent_to_llm=pipeline_result.should_send_to_llm,
+                if result.rowcount > 0:
+                    inserted += 1
+
+                    pipeline_result = await pipeline.run(raw_post)
+
+                    copypasta_score = pipeline_result.filter_results.get("copypasta")
+                    temporal = pipeline_result.filter_results.get("temporal_anomaly")
+                    account_age = pipeline_result.filter_results.get("account_age")
+
+                    post_row = await session.execute(
+                        select(Post.id).where(
+                            Post.source == raw_post.source,
+                            Post.source_id == raw_post.source_id,
+                            Post.project_id == project_id,
+                        )
                     )
-                    score_stmt = score_stmt.on_conflict_do_nothing()
-                    await session.execute(score_stmt)
-                    await session.commit()
+                    post_id = post_row.scalar_one_or_none()
 
-                    network_result = pipeline_result.filter_results.get("network_graph")
-                    if network_result and network_result.metadata.get("network_edges_to_persist"):
-                        for edge_data in network_result.metadata["network_edges_to_persist"]:
-                            edge_stmt = pg_insert(AuthorGraph).values(
-                                source_author=edge_data["source"],
-                                target_author=edge_data["target"],
-                                interaction=edge_data["interaction"],
-                                weight=1,
-                            )
-                            edge_stmt = edge_stmt.on_conflict_do_update(
-                                index_elements=["source_author", "target_author", "interaction"],
-                                set_={"weight": AuthorGraph.weight + 1, "last_seen": datetime.now(timezone.utc)}
-                            )
-                            await session.execute(edge_stmt)
+                    if post_id:
+                        score_stmt = pg_insert(HeuristicScore).values(
+                            post_id=post_id,
+                            copypasta_score=copypasta_score.score if copypasta_score else 0.0,
+                            temporal_anomaly=temporal.score if temporal else 0.0,
+                            account_age_flag=account_age.score if account_age else 0.0,
+                            composite_score=pipeline_result.composite_score,
+                            sent_to_llm=pipeline_result.should_send_to_llm,
+                        )
+                        score_stmt = score_stmt.on_conflict_do_nothing()
+                        await session.execute(score_stmt)
                         await session.commit()
 
-                    if pipeline_result.should_send_to_llm:
-                        flagged_for_llm += 1
-                        logger.info(
-                            "Post %s flagged for LLM (score=%.3f)",
-                            raw_post.source_id, pipeline_result.composite_score,
-                        )
-            else:
-                duplicates += 1
+                        network_result = pipeline_result.filter_results.get("network_graph")
+                        if network_result and network_result.metadata.get("network_edges_to_persist"):
+                            for edge_data in network_result.metadata["network_edges_to_persist"]:
+                                edge_stmt = pg_insert(AuthorGraph).values(
+                                    source_author=edge_data["source"],
+                                    target_author=edge_data["target"],
+                                    interaction=edge_data["interaction"],
+                                    weight=1,
+                                )
+                                edge_stmt = edge_stmt.on_conflict_do_update(
+                                    index_elements=["source_author", "target_author", "interaction"],
+                                    set_={"weight": AuthorGraph.weight + 1, "last_seen": datetime.now(timezone.utc)}
+                                )
+                                await session.execute(edge_stmt)
+                            await session.commit()
+
+                        if pipeline_result.should_send_to_llm:
+                            flagged_for_llm += 1
+                            logger.info(
+                                "Post %s flagged for LLM in project %s (score=%.3f)",
+                                raw_post.source_id, project_id, pipeline_result.composite_score,
+                            )
+                else:
+                    duplicates += 1
 
     logger.info(
         "Ingestion %s complete: total=%d, inserted=%d, duplicates=%d, flagged_for_llm=%d",

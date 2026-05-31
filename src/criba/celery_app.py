@@ -31,6 +31,16 @@ app.conf.update(
             "schedule": 120.0,
             "kwargs": {"source_name": "reddit"},
         },
+        "ingest-bluesky": {
+            "task": "criba.worker.tasks.ingest_source",
+            "schedule": 120.0,
+            "kwargs": {"source_name": "bluesky"},
+        },
+        "ingest-youtube": {
+            "task": "criba.worker.tasks.ingest_source",
+            "schedule": 900.0,
+            "kwargs": {"source_name": "youtube"},
+        },
         "analyze-flagged": {
             "task": "criba.llm.tasks.analyze_flagged_posts",
             "schedule": 120.0,

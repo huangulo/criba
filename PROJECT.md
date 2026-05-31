@@ -174,6 +174,7 @@ Only posts flagged by heuristic filters reach this layer. The local Ollama insta
 
 | Model | VRAM | Use Case |
 |-------|------|----------|
+| Qwen3.5 9B | 8 GB | Default model, strong multilingual (current) |
 | Mistral 7B | 6 GB | Fast classification, good multilingual |
 | Llama 3.1 8B | 8 GB | Best reasoning at small size |
 | Qwen2.5 14B | 12 GB | Superior Spanish/multilingual performance |
@@ -330,11 +331,11 @@ GET  /api/narratives/{id}/timeline — Platform bleed timeline
 GET  /api/campaigns               — Detected astroturfing campaigns
 GET  /api/campaigns/{id}          — Campaign detail with accounts and posts
 GET  /api/posts/flagged           — Flagged posts with heuristic + LLM scores
-GET  /api/posts/log               — Raw ingestion log (unflagged posts, baseline noise)
+GET  /api/posts/log               — Raw ingestion log (unflagged posts, baseline noise, filterable by platform/score)
 GET  /api/stats/dashboard         — Aggregate stats for the dashboard
 GET  /api/graph/clusters          — Current network topology clusters
 GET  /api/graph/account/{id}      — Interaction graph for a specific account
-GET/PUT /api/settings/notifications — Notification channel configuration
+GET/PUT /api/settings/notifications — Notification channel configuration (DB-backed)
 GET/PUT /api/settings/baseline    — Heuristic threshold configuration (DB-backed)
 GET  /api/projects                — List active monitoring projects with targets
 POST /api/projects                — Create project with assigned targets
@@ -394,10 +395,10 @@ WS   /ws/alerts                   — WebSocket feed for real-time alerts
 git clone https://github.com/[your-handle]/criba.git
 cd criba
 cp .env.example .env
-# Edit .env with your Telegram session, Reddit OAuth, RSS feeds
+# Edit .env with your Telegram session, Reddit OAuth, etc.
 docker compose up -d
-# Access dashboard at http://localhost:3000
-# Access API docs at http://localhost:8000/docs
+# Access dashboard at http://localhost:3030
+# Access API docs at http://localhost:8030/docs
 ```
 
 ---
@@ -405,52 +406,38 @@ docker compose up -d
 ## Configuration
 
 ```yaml
-# criba.yml
+# criba.yml — Infrastructure-only configuration
+# Monitoring targets and alert settings are managed in the database
+# via the dashboard (Projects & Settings console) or API endpoints.
 general:
   language: es            # primary analysis language
   timezone: America/Bogota
-  heuristic_threshold: 0.6  # score above this → send to LLM
 
 ollama:
-  host: http://localhost:11434
-  model: qwen2.5:14b      # or mistral:7b for lower VRAM
+  host: http://host.docker.internal:11434  # Docker → host Ollama
+  model: qwen3.5:9b       # or mistral:7b for lower VRAM
   timeout: 30
 
 sources:
   telegram:
     enabled: true
-    channels:
-      - "@channel_name_1"
-      - "@channel_name_2"
     poll_interval: 60      # seconds
 
   reddit:
     enabled: true
-    subreddits:
-      - "Colombia"
     poll_interval: 120
 
   rss:
     enabled: true
-    feeds:
-      - name: "El Tiempo"
-        url: "https://www.eltiempo.com/rss/..."
-      - name: "El Espectador"
-        url: "https://www.elespectador.com/rss/..."
     poll_interval: 300
 
   bluesky:
-    enabled: false
-    keywords: []
+    enabled: true
+    poll_interval: 120
 
   youtube:
-    enabled: false
-    channels: []
-
-alerts:
-  copypasta_threshold: 10    # flag if 10+ similar posts in 72h
-  temporal_cluster_min: 5    # flag if 5+ posts in anomalous window
-  new_account_days: 7        # flag accounts younger than this
+    enabled: true
+    poll_interval: 900
 ```
 
 ### Runtime Configuration (Database-Backed)
@@ -469,9 +456,9 @@ The following settings are stored in the `system_settings` table and can be modi
 | `telegram_bot_token` | "" | Telegram bot token for notifications |
 | `telegram_chat_id` | "" | Telegram chat ID for notifications |
 
-Monitoring targets (channels, keywords, handles) are managed through the `projects` and `project_targets` tables. New targets added via the dashboard are picked up automatically by the next Celery beat cycle — no restart required.
+Monitoring targets (channels, feeds, subreddits, keywords, handles) are managed through the `projects` and `project_targets` tables. When a Celery ingestion task runs, `_ingest_source_async` queries `project_targets` for the matching platform and builds the source config (channels, keywords, handles) from the database rows. If no targets exist for a platform, the task skips. New targets added via the dashboard are picked up automatically by the next Celery beat cycle — no restart required.
 
-The `criba.yml` file remains for static infrastructure settings (Ollama host/model, source API credentials, poll intervals).
+The `criba.yml` file is now **infrastructure-only**: Ollama host/model, source `enabled` flags, and poll intervals. All monitoring targets (channels, feeds, subreddits, keywords, handles) are managed exclusively through the `project_targets` table. Source-specific configuration (channels, feeds, subreddits) has been removed from YAML entirely.
 
 ---
 
@@ -504,8 +491,8 @@ The `criba.yml` file remains for static infrastructure settings (Ollama host/mod
   - `GET/PUT /api/settings/notifications` — Notification channel configuration
   - `POST /api/alerts/test/{channel}` — Test alert delivery
 - [x] WebSocket live feed (`/ws/alerts` with `ConnectionManager` for real-time broadcast)
-- [x] Next.js dashboard with components: LiveAlerts, NarrativeMap, CampaignList, CampaignInspector, NetworkGraph, StatsSummary, AlertSettings
-- [x] Celery beat schedule for automated ingestion (Telegram 60s, RSS 300s, Reddit 120s), LLM analysis (120s), embedding generation (180s), narrative clustering (300s), campaign detection (600s)
+- [x] Next.js dashboard with components: LiveAlerts, NarrativeMap, CampaignList, CampaignInspector, NetworkGraph, StatsSummary, AlertSettings, IngestionLog (Firehose), ProjectConsole
+- [x] Celery beat schedule for automated ingestion (Telegram 60s, RSS 300s, Reddit 120s, Bluesky 120s, YouTube 900s), LLM analysis (120s), embedding generation (180s), narrative clustering (300s), campaign detection (600s). Ingestion tasks query `project_targets` from the database for platform-specific channels/keywords.
 
 ### Phase 4: Expansion — In Progress
 
@@ -515,12 +502,14 @@ The `criba.yml` file remains for static infrastructure settings (Ollama host/mod
 - [x] YouTube comments plugin (yt-dlp-based, channel comment extraction with Google API fallback)
 - [x] Alert system — Slack, Discord, Telegram notifications on campaign detection with configurable confidence threshold
 - [x] Notification settings API (`GET/PUT /api/settings/notifications`, `POST /api/alerts/test/{channel}`)
-- [x] Colombia deployment configuration (Telegram channels, RSS feeds, Reddit subreddits, Bluesky keywords/handles, YouTube political channels)
+- [x] Colombia deployment configuration (seeded via Projects system: Telegram channels, RSS feeds, Reddit subreddits, Bluesky keywords/handles, YouTube political channels — no longer hardcoded in `criba.yml`)
 - [x] **Raw Ingestion Log** — `GET /api/posts/log` endpoint + Firehose slide-over panel for auditing unflagged posts and baseline noise
-- [x] **Dynamic configuration from database** — `system_settings` table replaces YAML for runtime-tunable parameters (heuristic thresholds, alert settings, notification channels). No restart needed to apply changes.
-- [x] **Projects & Targets system** — `projects` + `project_targets` tables with full CRUD API. Celery ingestion tasks now query `project_targets` instead of parsing `criba.yml`.
-- [x] **Baseline Settings Console** — `GET/PUT /api/settings/baseline` + dashboard UI with threshold sliders
-- [x] **Project Console** — Three-tab management panel (Baseline, Projects, Active) integrated into dashboard header
+- [x] **Dynamic configuration from database** — `system_settings` table replaces YAML for runtime-tunable parameters (heuristic thresholds, alert settings, notification channels). No restart needed to apply changes. All notification/baseline reads in `alerts.py`, `engine/tasks.py`, `scoring.py`, and `routes.py` now query `system_settings` instead of `load_config()`.
+- [x] **Projects & Targets system** — `projects` + `project_targets` tables with full CRUD API. Celery ingestion tasks (`_ingest_source_async`) now query `project_targets` by platform from the database instead of parsing `criba.yml`. The `criba.yml` sources section only controls `enabled` flag and `poll_interval`; channels/keywords/feeds are fully database-driven.
+- [x] **Baseline Settings Console** — `GET/PUT /api/settings/baseline` + dashboard UI with threshold sliders. Backend uses `get_heuristic_threshold()` async helper that reads from `system_settings`.
+- [x] **Project Console** — Three-tab management panel (Baseline, Projects, Active) integrated into dashboard header. Supports project CRUD with multi-target injection per platform.
+- [x] **Alembic migration** — `a1b2c3d4e5f6_projects_and_settings` creates `projects`, `project_targets`, and `system_settings` tables with seeded defaults.
+- [x] **Docker restart policies** — All services now use `restart: unless-stopped` for production resilience.
 
 **Remaining:**
 
@@ -556,7 +545,7 @@ Phase 5 is about making Criba deployable by anyone — journalists, NGOs, resear
 - [ ] **Architecture deep-dive** — How data flows from ingestion → filters → LLM → clustering → campaign detection. Useful for contributors modifying core logic.
 
 #### Pre-Built Configurations
-- [x] Colombia profile (current `criba.yml`) — Political channels, news RSS, relevant subreddits, Bluesky keywords.
+- [x] Colombia profile — Seed data for political channels, news RSS, relevant subreddits, Bluesky keywords (managed via Projects system, not `criba.yml`)
 - [ ] **Brazil profile** — `criba.profiles/brazil.yml` with Portuguese sources.
 - [ ] **US profile** — `criba.profiles/us.yml` with English sources.
 - [ ] **Mexico profile** — `criba.profiles/mexico.yml` with Mexican sources.

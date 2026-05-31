@@ -88,16 +88,31 @@ def cluster_narratives(self) -> dict:
 
 
 async def _cluster_narratives_async() -> dict:
+    from sqlalchemy import select
     from criba.db.connection import get_async_session_factory
+    from criba.db.models import Post
     from criba.engine.narrative import NarrativeEngine
 
     session_factory = get_async_session_factory()
-    async with session_factory() as session:
-        engine = NarrativeEngine(session=session)
-        result = await engine.cluster_posts()
 
-    logger.info("Narrative clustering result: %s", result)
-    return result
+    async with session_factory() as session:
+        project_ids = [
+            row[0] for row in
+            (await session.execute(select(Post.project_id).distinct())).all()
+        ]
+
+    total_result = {"clustered": 0, "new_narratives": 0, "updated_narratives": 0}
+
+    for project_id in project_ids:
+        session_factory = get_async_session_factory()
+        async with session_factory() as session:
+            engine = NarrativeEngine(session=session)
+            result = await engine.cluster_posts(project_id=project_id)
+            for key in total_result:
+                total_result[key] += result.get(key, 0)
+
+    logger.info("Narrative clustering result: %s", total_result)
+    return total_result
 
 
 @app.task(bind=True, max_retries=3, default_retry_delay=120)
@@ -113,7 +128,7 @@ async def _detect_campaigns_async() -> dict:
     from sqlalchemy import select
     from criba.db.connection import get_async_session_factory
     from criba.engine.narrative import NarrativeEngine
-    from criba.db.models import Campaign, SystemSetting
+    from criba.db.models import Campaign, Post, SystemSetting
 
     session_factory = get_async_session_factory()
 
@@ -122,12 +137,23 @@ async def _detect_campaigns_async() -> dict:
             row[0] for row in (await session.execute(select(Campaign.id))).all()
         )
 
-    session_factory = get_async_session_factory()
     async with session_factory() as session:
-        engine = NarrativeEngine(session=session)
-        result = await engine.detect_campaigns()
+        project_ids = [
+            row[0] for row in
+            (await session.execute(select(Post.project_id).distinct())).all()
+        ]
 
-    if result.get("detected", 0) > 0:
+    total_result = {"detected": 0, "skipped": 0}
+
+    for project_id in project_ids:
+        session_factory = get_async_session_factory()
+        async with session_factory() as session:
+            engine = NarrativeEngine(session=session)
+            result = await engine.detect_campaigns(project_id=project_id)
+            for key in total_result:
+                total_result[key] += result.get(key, 0)
+
+    if total_result.get("detected", 0) > 0:
         async with session_factory() as session:
             all_ids = set(
                 row[0] for row in (await session.execute(select(Campaign.id))).all()
@@ -157,5 +183,5 @@ async def _detect_campaigns_async() -> dict:
                         })
                         logger.info("Triggered alert for campaign %s (confidence=%.2f)", campaign.id, campaign.confidence)
 
-    logger.info("Campaign detection result: %s", result)
-    return result
+    logger.info("Campaign detection result: %s", total_result)
+    return total_result

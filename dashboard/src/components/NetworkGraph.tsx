@@ -41,11 +41,13 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
 interface NetworkGraphProps {
   narrativeId: string | null;
   narrativeLabel?: string | null;
+  projectId: string;
 }
 
 export default function NetworkGraph({
   narrativeId,
   narrativeLabel,
+  projectId,
 }: NetworkGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,7 +64,7 @@ export default function NetworkGraph({
     }
     setLoading(true);
     setError(null);
-    fetchNetworkGraph(narrativeId)
+    fetchNetworkGraph(narrativeId, projectId)
       .then((result) => {
         setData(result);
         setLoading(false);
@@ -71,7 +73,7 @@ export default function NetworkGraph({
         setError(err.message);
         setLoading(false);
       });
-  }, [narrativeId]);
+  }, [narrativeId, projectId]);
 
   useEffect(() => {
     load();

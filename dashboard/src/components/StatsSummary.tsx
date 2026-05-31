@@ -40,22 +40,22 @@ function StatCard({ icon, value, label, accent }: StatCardProps) {
   );
 }
 
-export default function StatsSummary() {
+export default function StatsSummary({ projectId }: { projectId: string }) {
   const [stats, setStats] = useState<StatsSummary | null>(null);
 
   useEffect(() => {
-    fetchStats()
+    fetchStats(projectId)
       .then(setStats)
       .catch(() => {});
 
     const interval = setInterval(() => {
-      fetchStats()
+      fetchStats(projectId)
         .then(setStats)
         .catch(() => {});
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [projectId]);
 
   if (!stats) {
     return (

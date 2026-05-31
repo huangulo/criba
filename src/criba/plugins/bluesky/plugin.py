@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -118,7 +119,7 @@ class BlueskyPlugin(SourcePlugin):
 
         media_urls = []
         if hasattr(post, "embed") and post.embed:
-            embed = post.post.embed
+            embed = post.embed
             if hasattr(embed, "images"):
                 for image in getattr(embed, "images", []):
                     if hasattr(image, "fullsize"):
@@ -158,7 +159,14 @@ class BlueskyPlugin(SourcePlugin):
             logger.warning("No keywords or handles configured for Bluesky")
             return
 
+        handle = os.environ.get("BLUESKY_HANDLE")
+        password = os.environ.get("BLUESKY_APP_PASSWORD")
+        if not handle or not password:
+            logger.warning("BLUESKY_HANDLE or BLUESKY_APP_PASSWORD not set, skipping")
+            return
+
         client = AsyncClient()
+        await client.login(handle, password)
 
         for keyword in keywords:
             try:
