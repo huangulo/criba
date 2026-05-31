@@ -122,7 +122,7 @@ class TelegramPlugin(SourcePlugin):
         engagement = {
             "views": message.views or 0,
             "forwards": message.forwards or 0,
-            "replies": message.replies.count if message.replies else 0,
+            "replies": message.replies.replies if message.replies else 0,
         }
 
         # Author info
