@@ -91,3 +91,6 @@ inject_*.py
 # Dashboard screenshot
 dashboard-validated.png
 graphify-out/
+.opencode/
+.sisyphus/
+Criba.code-workspace
