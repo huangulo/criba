@@ -29,6 +29,7 @@ dev = [
 ]
 
 [project.scripts]
+criba = "criba.cli:main"
 criba-worker = "criba.worker.tasks:main"
 
 [tool.ruff]
