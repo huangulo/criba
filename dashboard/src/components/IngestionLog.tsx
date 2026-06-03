@@ -35,6 +35,7 @@ function scoreColor(score: number | null): string {
 }
 
 interface IngestionLogProps {
+  projectId: string;
   open: boolean;
   onClose: () => void;
 }
@@ -50,7 +51,7 @@ const PLATFORM_OPTIONS = [
   "tiktok",
 ];
 
-export default function IngestionLog({ open, onClose }: IngestionLogProps) {
+export default function IngestionLog({ projectId, open, onClose }: IngestionLogProps) {
   const [posts, setPosts] = useState<IngestionLogPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<string>("");
@@ -58,7 +59,7 @@ export default function IngestionLog({ open, onClose }: IngestionLogProps) {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetchIngestionLogs({
+    fetchIngestionLogs(projectId, {
       platform: platformFilter || undefined,
       max_score: maxScore,
       limit: 200,
@@ -66,7 +67,7 @@ export default function IngestionLog({ open, onClose }: IngestionLogProps) {
       .then(setPosts)
       .catch(() => setPosts([]))
       .finally(() => setLoading(false));
-  }, [platformFilter, maxScore]);
+  }, [projectId, platformFilter, maxScore]);
 
   useEffect(() => {
     if (open) load();

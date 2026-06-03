@@ -306,3 +306,96 @@ export async function deleteProject(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/projects/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete project");
 }
+
+export interface EvalQueueItem {
+  post_id: string;
+  source: string;
+  author_handle: string | null;
+  author_created: string | null;
+  published_at: string;
+  content: string;
+  copypasta_score: number;
+  temporal_anomaly: number;
+  account_age_flag: number;
+  composite_score: number;
+  account_age_days: number | null;
+}
+
+export interface EvalQueueResponse {
+  posts: EvalQueueItem[];
+  remaining_unlabeled: number;
+}
+
+export async function fetchEvalQueue(
+  projectId: string,
+  limit: number = 25,
+  highFrac: number = 0.75,
+): Promise<EvalQueueResponse> {
+  const params = new URLSearchParams();
+  params.set("project_id", projectId);
+  params.set("limit", String(limit));
+  params.set("high_frac", String(highFrac));
+  const res = await fetch(`${API_BASE}/api/eval/queue?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch eval queue");
+  return res.json();
+}
+
+export interface EvalLabelResponse {
+  post_id: string;
+  label: string;
+  status: string;
+}
+
+export async function submitEvalLabel(
+  postId: string,
+  label: "organic" | "coordinated" | "uncertain",
+): Promise<EvalLabelResponse> {
+  const res = await fetch(`${API_BASE}/api/eval/label`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ post_id: postId, label }),
+  });
+  if (!res.ok) throw new Error("Failed to submit label");
+  return res.json();
+}
+
+export interface SimilarPost {
+  post_id: string;
+  author_handle: string | null;
+  source: string;
+  published_at: string;
+  content: string;
+  similarity: number;
+}
+
+export interface AuthorRecentPost {
+  post_id: string;
+  source: string;
+  published_at: string;
+  content: string;
+  composite_score: number | null;
+}
+
+export interface AuthorStats {
+  author_handle: string | null;
+  author_created: string | null;
+  account_age_days: number | null;
+  total_posts_in_project: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  distinct_sources: string[];
+}
+
+export interface EvalEvidenceResponse {
+  post_id: string;
+  project_id: string;
+  similar_posts: SimilarPost[];
+  author_recent_posts: AuthorRecentPost[];
+  author_stats: AuthorStats;
+}
+
+export async function fetchEvalEvidence(postId: string): Promise<EvalEvidenceResponse> {
+  const res = await fetch(`${API_BASE}/api/eval/evidence/${postId}`);
+  if (!res.ok) throw new Error("Failed to fetch eval evidence");
+  return res.json();
+}

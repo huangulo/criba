@@ -193,3 +193,68 @@ class ProjectResponse(BaseModel):
     description: str
     created_at: datetime
     targets: list[ProjectTargetResponse]
+
+
+class EvalQueueItem(BaseModel):
+    post_id: uuid.UUID
+    source: str
+    author_handle: str | None
+    author_created: datetime | None
+    published_at: datetime
+    content: str
+    copypasta_score: float
+    temporal_anomaly: float
+    account_age_flag: float
+    composite_score: float
+    account_age_days: float | None
+
+
+class EvalQueueResponse(BaseModel):
+    posts: list[EvalQueueItem]
+    remaining_unlabeled: int
+
+
+class EvalLabelInput(BaseModel):
+    post_id: uuid.UUID
+    label: str
+
+
+class EvalLabelResponse(BaseModel):
+    post_id: uuid.UUID
+    label: str
+    status: str
+
+
+class SimilarPost(BaseModel):
+    post_id: uuid.UUID
+    author_handle: str | None
+    source: str
+    published_at: datetime
+    content: str
+    similarity: float
+
+
+class AuthorRecentPost(BaseModel):
+    post_id: uuid.UUID
+    source: str
+    published_at: datetime
+    content: str
+    composite_score: float | None
+
+
+class AuthorStats(BaseModel):
+    author_handle: str | None
+    author_created: datetime | None
+    account_age_days: float | None
+    total_posts_in_project: int
+    first_seen: datetime | None
+    last_seen: datetime | None
+    distinct_sources: list[str]
+
+
+class EvalEvidenceResponse(BaseModel):
+    post_id: uuid.UUID
+    project_id: uuid.UUID
+    similar_posts: list[SimilarPost]
+    author_recent_posts: list[AuthorRecentPost]
+    author_stats: AuthorStats

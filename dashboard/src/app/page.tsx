@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Settings, Radio, FolderKanban } from "lucide-react";
+import { Settings, Radio, FolderKanban, Tag } from "lucide-react";
 import StatsSummary from "@/components/StatsSummary";
 import NarrativeMap from "@/components/NarrativeMap";
 import CampaignList from "@/components/CampaignList";
@@ -11,6 +11,7 @@ import CampaignInspector from "@/components/CampaignInspector";
 import AlertSettings from "@/components/AlertSettings";
 import IngestionLog from "@/components/IngestionLog";
 import ProjectConsole from "@/components/ProjectConsole";
+import LabelingPanel from "@/components/LabelingPanel";
 import { fetchProjects, type Project } from "@/lib/api";
 
 export default function Home() {
@@ -28,6 +29,7 @@ export default function Home() {
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [ingestionLogOpen, setIngestionLogOpen] = useState(false);
   const [projectConsoleOpen, setProjectConsoleOpen] = useState(false);
+  const [labelingPanelOpen, setLabelingPanelOpen] = useState(false);
 
   useEffect(() => {
     fetchProjects().then((data) => {
@@ -86,6 +88,14 @@ export default function Home() {
               <span className="text-xs font-mono">Firehose</span>
             </button>
             <button
+              onClick={() => setLabelingPanelOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded border border-surface-border bg-surface-card hover:bg-surface-border transition-colors text-text-muted hover:text-text-primary"
+              title="Label Posts for Eval"
+            >
+              <Tag className="w-4 h-4" />
+              <span className="text-xs font-mono">Label</span>
+            </button>
+            <button
               onClick={() => setProjectConsoleOpen(true)}
               className="flex items-center gap-2 px-3 py-1.5 rounded border border-surface-border bg-surface-card hover:bg-surface-border transition-colors text-text-muted hover:text-text-primary"
               title="Projects & Settings"
@@ -132,6 +142,7 @@ export default function Home() {
       <AlertSettings open={alertSettingsOpen} onClose={() => setAlertSettingsOpen(false)} />
       <IngestionLog projectId={activeProjectId ?? ""} open={ingestionLogOpen} onClose={() => setIngestionLogOpen(false)} />
       <ProjectConsole open={projectConsoleOpen} onClose={() => setProjectConsoleOpen(false)} onProjectsChange={refreshProjects} />
+      <LabelingPanel projectId={activeProjectId ?? ""} open={labelingPanelOpen} onClose={() => setLabelingPanelOpen(false)} />
     </main>
   );
 }

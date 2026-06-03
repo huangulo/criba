@@ -1,9 +1,12 @@
 import logging
+import re
 import uuid
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, and_, delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from criba.api.schemas import (
@@ -12,6 +15,13 @@ from criba.api.schemas import (
     CampaignInspectResponse,
     CampaignResponse,
     CopypastaPhrase,
+    AuthorRecentPost,
+    AuthorStats,
+    EvalEvidenceResponse,
+    EvalLabelInput,
+    EvalLabelResponse,
+    EvalQueueItem,
+    EvalQueueResponse,
     FlaggedPostResponse,
     InspectPost,
     NarrativeResponse,
@@ -24,6 +34,7 @@ from criba.api.schemas import (
     ProjectTargetInput,
     ProjectTargetResponse,
     RawPostLog,
+    SimilarPost,
     StatsSummary,
     TestAlertResponse,
 )
@@ -31,6 +42,7 @@ from criba.db.connection import get_async_session
 from criba.db.models import (
     AuthorGraph,
     Campaign,
+    GroundTruth,
     HeuristicScore,
     LlmAnalysis,
     Narrative,
@@ -697,3 +709,258 @@ async def test_alert(channel: str):
     from criba.worker.alerts import send_test_alert
     result = await send_test_alert(channel)
     return TestAlertResponse(**result)
+
+
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F1E0-\U0001F1FF"
+    "\U00002600-\U000027BF"
+    "\U0000FE00-\U0000FE0F"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F"
+    "\U0001FA70-\U0001FAFF"
+    "\U00002700-\U000027BF"
+    "\U000024C2-\U0001F251"
+    "]+",
+    flags=re.UNICODE,
+)
+_URL_RE = re.compile(r"https?://\S+")
+_MENTION_RE = re.compile(r"@\w+")
+
+
+def is_junk(content: str, min_words: int = 2) -> bool:
+    if not content or not content.strip():
+        return True
+    stripped = _EMOJI_RE.sub("", content)
+    stripped = _URL_RE.sub("", stripped)
+    stripped = _MENTION_RE.sub("", stripped)
+    stripped = re.sub(r"[^\w\s]", "", stripped).strip()
+    if not stripped:
+        return True
+    words = [w for w in stripped.split() if len(w) >= 2 and any(c.isalnum() for c in w)]
+    return len(words) < min_words
+
+
+@router.get("/eval/queue", response_model=EvalQueueResponse)
+async def get_eval_queue(
+    project_id: uuid.UUID = Query(..., description="Project to scope results to"),
+    limit: int = Query(default=25, le=200),
+    high_frac: float = Query(default=0.5, ge=0.0, le=1.0),
+    min_words: int = Query(default=2, ge=1, le=10, description="Minimum meaningful words to avoid junk"),
+    session: AsyncSession = Depends(get_async_session),
+):
+    n_high = round(limit * high_frac)
+    n_low = limit - n_high
+    fetch_multiplier = 4
+
+    base = (
+        select(
+            Post.id,
+            Post.source,
+            Post.author_handle,
+            Post.author_created,
+            Post.published_at,
+            Post.content,
+            HeuristicScore.copypasta_score,
+            HeuristicScore.temporal_anomaly,
+            HeuristicScore.account_age_flag,
+            HeuristicScore.composite_score,
+        )
+        .join(HeuristicScore, HeuristicScore.post_id == Post.id)
+        .outerjoin(GroundTruth, GroundTruth.post_id == Post.id)
+        .where(Post.project_id == project_id)
+        .where(GroundTruth.post_id.is_(None))
+    )
+
+    high_q = base.order_by(HeuristicScore.composite_score.desc()).limit(n_high * fetch_multiplier)
+    low_q = base.order_by(HeuristicScore.composite_score.asc()).limit(n_low * fetch_multiplier)
+
+    union_q = high_q.union(low_q).subquery()
+    rows = (await session.execute(select(union_q))).fetchall()
+
+    seen: set[uuid.UUID] = set()
+    high_survivors = []
+    low_survivors = []
+    for row in rows:
+        if row[0] in seen:
+            continue
+        seen.add(row[0])
+        if is_junk(row[5], min_words):
+            continue
+        if len(high_survivors) < n_high:
+            high_survivors.append(row)
+        else:
+            low_survivors.append(row)
+
+    high_survivors = high_survivors[:n_high]
+    low_survivors = low_survivors[:n_low]
+
+    remaining = (
+        await session.execute(
+            select(func.count(Post.id))
+            .join(HeuristicScore, HeuristicScore.post_id == Post.id)
+            .outerjoin(GroundTruth, GroundTruth.post_id == Post.id)
+            .where(Post.project_id == project_id)
+            .where(GroundTruth.post_id.is_(None))
+        )
+    ).scalar_one()
+
+    items = []
+    for row in high_survivors + low_survivors:
+        post_id, source, author_handle, author_created, published_at, content, cp, ta, aa, composite = row
+        age_days = None
+        if author_created and published_at:
+            age_days = (published_at - author_created).total_seconds() / 86400.0
+        items.append(EvalQueueItem(
+            post_id=post_id,
+            source=source,
+            author_handle=author_handle,
+            author_created=author_created,
+            published_at=published_at,
+            content=content,
+            copypasta_score=cp,
+            temporal_anomaly=ta,
+            account_age_flag=aa,
+            composite_score=composite,
+            account_age_days=age_days,
+        ))
+
+    return EvalQueueResponse(posts=items, remaining_unlabeled=remaining)
+
+
+@router.post("/eval/label", response_model=EvalLabelResponse)
+async def label_eval_post(
+    data: EvalLabelInput,
+    session: AsyncSession = Depends(get_async_session),
+):
+    if data.label not in ("organic", "coordinated", "uncertain"):
+        raise HTTPException(status_code=422, detail=f"Invalid label: {data.label}. Must be organic, coordinated, or uncertain.")
+
+    post = await session.get(Post, data.post_id)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    stmt = pg_insert(GroundTruth).values(
+        post_id=data.post_id,
+        label=data.label,
+        labeled_by="dashboard",
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["post_id"],
+        set_={"label": stmt.excluded.label, "labeled_at": func.now()},
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+    return EvalLabelResponse(post_id=data.post_id, label=data.label, status="labeled")
+
+
+def _extract_shingles(text: str, k: int = 5) -> set[str]:
+    words = text.lower().split()
+    if len(words) < k:
+        return {"".join(words)} if words else set()
+    return {" ".join(words[i : i + k]) for i in range(len(words) - k + 1)}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+@router.get("/eval/evidence/{post_id}", response_model=EvalEvidenceResponse)
+async def get_eval_evidence(
+    post_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+):
+    post = await session.get(Post, post_id)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    project_id = post.project_id
+
+    target_shingles = _extract_shingles(post.content)
+    window_start = post.published_at - timedelta(hours=72)
+    window_end = post.published_at + timedelta(hours=72)
+
+    candidates = (
+        await session.execute(
+            select(Post.id, Post.author_handle, Post.source, Post.published_at, Post.content)
+            .where(Post.project_id == project_id)
+            .where(Post.id != post_id)
+            .where(Post.published_at.between(window_start, window_end))
+            .order_by(Post.published_at.desc())
+            .limit(2000)
+        )
+    ).fetchall()
+
+    scored = []
+    for cid, chandle, csrc, cpub, ccontent in candidates:
+        if is_junk(ccontent, 2):
+            continue
+        sim = _jaccard(target_shingles, _extract_shingles(ccontent))
+        if sim >= 0.5:
+            scored.append((sim, cid, chandle, csrc, cpub, ccontent))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    similar_posts = [
+        SimilarPost(post_id=sid, author_handle=sh, source=ss, published_at=sp, content=sc, similarity=round(sv, 3))
+        for sv, sid, sh, ss, sp, sc in scored[:10]
+    ]
+
+    author_recent = (
+        await session.execute(
+            select(Post.id, Post.source, Post.published_at, Post.content, HeuristicScore.composite_score)
+            .outerjoin(HeuristicScore, HeuristicScore.post_id == Post.id)
+            .where(Post.project_id == project_id)
+            .where(Post.author_id == post.author_id)
+            .order_by(Post.published_at.desc())
+            .limit(15)
+        )
+    ).fetchall()
+
+    author_recent_posts = [
+        AuthorRecentPost(
+            post_id=aid, source=asrc, published_at=apub, content=acontent, composite_score=ascore,
+        )
+        for aid, asrc, apub, acontent, ascore in author_recent
+    ]
+
+    agg = (
+        await session.execute(
+            select(
+                func.count(Post.id),
+                func.min(Post.published_at),
+                func.max(Post.published_at),
+                func.array_agg(func.distinct(Post.source)),
+            )
+            .where(Post.project_id == project_id)
+            .where(Post.author_id == post.author_id)
+        )
+    ).fetchone()
+
+    total_author_posts, first_seen, last_seen, sources = agg
+    account_age_days = None
+    if post.author_created:
+        account_age_days = (datetime.now(timezone.utc) - post.author_created).total_seconds() / 86400.0
+
+    author_stats = AuthorStats(
+        author_handle=post.author_handle,
+        author_created=post.author_created,
+        account_age_days=account_age_days,
+        total_posts_in_project=total_author_posts or 0,
+        first_seen=first_seen,
+        last_seen=last_seen,
+        distinct_sources=list(sources) if sources else [],
+    )
+
+    return EvalEvidenceResponse(
+        post_id=post_id,
+        project_id=project_id,
+        similar_posts=similar_posts,
+        author_recent_posts=author_recent_posts,
+        author_stats=author_stats,
+    )
