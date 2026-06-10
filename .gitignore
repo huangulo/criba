@@ -95,3 +95,4 @@ graphify-out/
 .sisyphus/
 Criba.code-workspace
 /.next/
+criba_sample*.csv
