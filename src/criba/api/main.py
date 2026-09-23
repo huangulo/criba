@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import Depends, FastAPI
@@ -11,6 +12,17 @@ from criba.api.ws import alerts_subscriber
 from criba.api.ws import router as ws_router
 
 logger = logging.getLogger(__name__)
+
+# Compose serves the dashboard on 3030; `next dev` defaults to 3000.
+DEFAULT_CORS_ORIGINS = ["http://localhost:3030", "http://localhost:3000"]
+
+
+def _cors_origins() -> list[str]:
+    """Allowed origins: CRIBA_CORS_ORIGINS (comma-separated) or the defaults."""
+    configured = os.getenv("CRIBA_CORS_ORIGINS", "")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return list(DEFAULT_CORS_ORIGINS)
 
 
 @asynccontextmanager
@@ -32,7 +44,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3030"],
+        allow_origins=_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
