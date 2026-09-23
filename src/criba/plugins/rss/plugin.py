@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -16,6 +17,22 @@ logger = logging.getLogger(__name__)
 HASHTAG_RE = re.compile(r"#(\w+)")
 MENTION_RE = re.compile(r"@(\w+)")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+MAX_SOURCE_ID_CHARS = 255
+
+
+def _bounded_source_id(raw: str) -> str:
+    """Bound an entry identifier to the posts.source_id column (String(255)).
+
+    Feed entry IDs and links are unbounded; one longer than the column would
+    fail the insert on every poll and turn a single bad entry into a
+    permanent ingestion retry loop. Over-long values hash to a stable short
+    form so dedup keeps working across polls.
+    """
+    raw = raw.strip()
+    if len(raw) <= MAX_SOURCE_ID_CHARS:
+        return raw
+    return "long:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _strip_html(text: str) -> str:
@@ -127,8 +144,15 @@ class RSSPlugin(SourcePlugin):
         hashtags = HASHTAG_RE.findall(content)
         mentions = MENTION_RE.findall(content)
 
-        # Generate stable source_id from entry id or link
-        source_id = getattr(entry, "id", "") or url or ""
+        # Generate stable source_id from entry id or link. Over-long values
+        # are hashed to fit posts.source_id (String(255)); entries without
+        # any identifier get a content-derived one so distinct entries stay
+        # distinct and repeats still dedup.
+        raw_source_id = getattr(entry, "id", "") or url or ""
+        if not raw_source_id:
+            material = f"{feed_name}|{title}|{content[:500]}"
+            raw_source_id = "derived:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+        source_id = _bounded_source_id(raw_source_id)
 
         return RawPost(
             source="rss",
