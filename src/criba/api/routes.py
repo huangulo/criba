@@ -282,7 +282,11 @@ async def get_network(
     author_ids = set(author_info.keys())
 
     stmt = select(AuthorGraph).where(
-        and_(AuthorGraph.source_author.in_(author_ids), AuthorGraph.target_author.in_(author_ids))
+        and_(
+            AuthorGraph.project_id == project_id,
+            AuthorGraph.source_author.in_(author_ids),
+            AuthorGraph.target_author.in_(author_ids),
+        )
     )
     result = await session.execute(stmt)
     edges = result.scalars().all()
@@ -700,6 +704,14 @@ async def delete_project(
     await session.execute(delete(ProjectTarget).where(ProjectTarget.project_id == project_id))
     await session.delete(project)
     await session.commit()
+
+    # Drop the project's persisted filter corpora too; a recreated project
+    # must not inherit the deleted one's dedup/copypasta history.
+    try:
+        from criba.filters.state import clear_filter_state
+        await clear_filter_state(project_id)
+    except Exception:
+        logger.exception("Could not clear filter state for project %s", project_id)
 
 
 @router.post("/alerts/test/{channel}", response_model=TestAlertResponse)

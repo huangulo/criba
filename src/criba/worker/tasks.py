@@ -1,12 +1,48 @@
 import asyncio
 import logging
 import sys
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
 from criba.celery_app import app
 
 logger = logging.getLogger(__name__)
+
+
+def _snapshot_filter_state(pipeline) -> dict:
+    """Collect a state snapshot from every stateful filter in the pipeline."""
+    state: dict = {}
+    for f in pipeline.filters:
+        try:
+            snapshot = f.export_state()
+        except Exception:
+            logger.exception("Filter %s failed to export its state", f.get_name())
+            continue
+        if snapshot is not None:
+            state[f.get_name()] = snapshot
+    return state
+
+
+async def _restore_filter_state(pipeline, project_id: uuid.UUID) -> None:
+    """Load a project's persisted filter state into a freshly created pipeline."""
+    from criba.filters.state import load_filter_state
+
+    filter_names = [f.get_name() for f in pipeline.filters]
+    try:
+        snapshots = await load_filter_state(project_id, filter_names)
+    except Exception:
+        logger.exception("Could not load filter state for project %s; starting fresh", project_id)
+        return
+
+    for f in pipeline.filters:
+        snapshot = snapshots.get(f.get_name())
+        if snapshot is None:
+            continue
+        try:
+            f.load_state(snapshot)
+        except Exception:
+            logger.exception("Could not restore state for filter %s", f.get_name())
 
 
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
@@ -22,6 +58,7 @@ async def _ingest_source_async(source_name: str) -> dict:
     from criba.db.connection import get_async_session_factory
     from criba.db.models import AuthorGraph, HeuristicScore, Post, ProjectTarget
     from criba.filters.scoring import create_pipeline, get_scoring_settings
+    from criba.filters.state import save_filter_state
     from criba.plugins.registry import get_plugin
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -47,7 +84,6 @@ async def _ingest_source_async(source_name: str) -> dict:
         targets_by_project[t.project_id].append(t)
 
     settings = await get_scoring_settings()
-    pipeline = create_pipeline(**settings)
 
     total = 0
     inserted = 0
@@ -91,6 +127,12 @@ async def _ingest_source_async(source_name: str) -> dict:
                 "keywords": keywords,
                 "poll_interval": 60,
             }
+
+        # One pipeline per project: the stateful filters keep per-project
+        # corpora, restored from Redis so they survive worker restarts and
+        # stay isolated between projects.
+        pipeline = create_pipeline(**settings)
+        await _restore_filter_state(pipeline, project_id)
 
         logger.info("Ingesting %s for project %s", source_name, project_id)
         session_factory = get_async_session_factory()
@@ -147,13 +189,17 @@ async def _ingest_source_async(source_name: str) -> dict:
                 if network_result and network_result.metadata.get("network_edges_to_persist"):
                     for edge_data in network_result.metadata["network_edges_to_persist"]:
                         edge_stmt = pg_insert(AuthorGraph).values(
+                            project_id=project_id,
+                            source=source_name,
                             source_author=edge_data["source"],
                             target_author=edge_data["target"],
                             interaction=edge_data["interaction"],
                             weight=1,
                         )
                         edge_stmt = edge_stmt.on_conflict_do_update(
-                            index_elements=["source_author", "target_author", "interaction"],
+                            index_elements=[
+                                "project_id", "source", "source_author", "target_author", "interaction",
+                            ],
                             set_={"weight": AuthorGraph.weight + 1, "last_seen": datetime.now(timezone.utc)}
                         )
                         await session.execute(edge_stmt)
@@ -163,6 +209,13 @@ async def _ingest_source_async(source_name: str) -> dict:
                 # retry re-ingests and re-scores the post instead of skipping
                 # it as a duplicate forever.
                 await session.commit()
+
+                # Persist filter corpora only after the commit lands: the
+                # Redis snapshot then matches the database exactly.
+                try:
+                    await save_filter_state(project_id, _snapshot_filter_state(pipeline))
+                except Exception:
+                    logger.exception("Could not persist filter state for project %s", project_id)
 
                 if pipeline_result.should_send_to_llm:
                     flagged_for_llm += 1

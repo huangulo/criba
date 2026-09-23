@@ -25,3 +25,14 @@ class BaseFilter(ABC):
     def weight(self) -> float:
         """Weight of this filter in the composite score (0.0 - 1.0). Default 1.0."""
         return 1.0
+
+    def export_state(self) -> dict | None:
+        """Snapshot of cross-run state for persistence, or None if stateless.
+
+        Snapshots must be plain picklable data (dicts, lists, tuples, scalars)
+        and cheap to serialize: the worker persists them after every ingested post.
+        """
+        return None
+
+    def load_state(self, state: dict) -> None:
+        """Restore a snapshot previously produced by export_state(). Default: no-op."""

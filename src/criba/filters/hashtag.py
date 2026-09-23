@@ -84,3 +84,27 @@ class HashtagCooccurrenceFilter(BaseFilter):
             return
         cutoff = datetime.now(timezone.utc) - timedelta(hours=CORPUS_HOURS)
         self._entries = [(t, h) for t, h in self._entries if t >= cutoff]
+
+    def export_state(self) -> dict:
+        return {
+            "pairs": {
+                h1: {
+                    h2: {"count": record.count, "authors": sorted(record.authors)}
+                    for h2, record in inner.items()
+                }
+                for h1, inner in self._pairs.items()
+            },
+            "entries": [(ts, sorted(tags)) for ts, tags in self._entries],
+        }
+
+    def load_state(self, state: dict) -> None:
+        pairs: dict[str, dict[str, _CooccurrenceRecord]] = defaultdict(
+            lambda: defaultdict(_CooccurrenceRecord)
+        )
+        for h1, inner in state.get("pairs", {}).items():
+            for h2, record_data in inner.items():
+                record = pairs[h1][h2]
+                record.count = int(record_data.get("count", 0))
+                record.authors = set(record_data.get("authors", []))
+        self._pairs = pairs
+        self._entries = [(ts, set(tags)) for ts, tags in state.get("entries", [])]

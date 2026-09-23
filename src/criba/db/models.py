@@ -123,6 +123,10 @@ class NarrativePost(Base):
 class AuthorGraph(Base):
     __tablename__ = "author_graph"
 
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(50), primary_key=True)
     source_author: Mapped[str] = mapped_column(String(255), primary_key=True)
     target_author: Mapped[str] = mapped_column(String(255), primary_key=True)
     interaction: Mapped[str] = mapped_column(String(50), primary_key=True)

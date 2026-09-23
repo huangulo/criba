@@ -86,3 +86,20 @@ class TemporalAnomalyFilter(BaseFilter):
                 "temporal_recent_cluster_size": recent_count,
             },
         )
+
+    def export_state(self) -> dict:
+        return {
+            "hourly_counts": {source: list(counts) for source, counts in self._hourly_counts.items()},
+            "total_counts": dict(self._total_counts),
+            "recent_posts": {source: list(ts) for source, ts in self._recent_posts.items()},
+        }
+
+    def load_state(self, state: dict) -> None:
+        self._hourly_counts = defaultdict(
+            lambda: [0] * 24,
+            {source: list(counts) for source, counts in state.get("hourly_counts", {}).items()},
+        )
+        self._total_counts = defaultdict(int, state.get("total_counts", {}))
+        self._recent_posts = defaultdict(
+            list, {source: list(ts) for source, ts in state.get("recent_posts", {}).items()}
+        )

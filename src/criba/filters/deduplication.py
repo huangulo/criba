@@ -63,3 +63,11 @@ class DeduplicationFilter(BaseFilter):
                 expired_keys.append(key)
         for key in expired_keys:
             del self._seen[key]
+
+    def export_state(self) -> dict:
+        return {"seen": {content_hash: list(ts) for content_hash, ts in self._seen.items()}}
+
+    def load_state(self, state: dict) -> None:
+        self._seen = defaultdict(
+            list, {content_hash: list(ts) for content_hash, ts in state.get("seen", {}).items()}
+        )

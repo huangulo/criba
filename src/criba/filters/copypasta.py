@@ -128,3 +128,28 @@ class CopypastaFilter(BaseFilter):
         if expired:
             logger.info("Pruned %d expired copypasta entries", len(expired))
         self._last_prune = now
+
+    def export_state(self) -> dict:
+        # Export the corpus, not the LSH object: the entries are enough to
+        # rebuild it deterministically and stay picklable across versions.
+        return {
+            "entries": [
+                (key, entry.author_id, entry.minhash, entry.timestamp)
+                for key, entry in self._entries.items()
+            ],
+            "last_prune": self._last_prune,
+        }
+
+    def load_state(self, state: dict) -> None:
+        for key, author_id, minhash, timestamp in state.get("entries", []):
+            self._entries[key] = _CorpusEntry(
+                post_id=key, author_id=author_id, minhash=minhash, timestamp=timestamp
+            )
+            try:
+                self._lsh.insert(key, minhash)
+            except ValueError:
+                # Duplicate key in the snapshot; the entry dict already won.
+                logger.warning("Skipped duplicate copypasta corpus key %s", key)
+        last_prune = state.get("last_prune")
+        if isinstance(last_prune, datetime):
+            self._last_prune = last_prune

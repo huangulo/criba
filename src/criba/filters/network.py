@@ -93,3 +93,19 @@ class NetworkGraphFilter(BaseFilter):
                 if self._adjacency[source][target] <= 0:
                     del self._adjacency[source][target]
         self._edge_timestamps = [(s, t, ts) for s, t, ts in self._edge_timestamps if ts >= cutoff]
+
+    def export_state(self) -> dict:
+        return {
+            "adjacency": {source: dict(targets) for source, targets in self._adjacency.items()},
+            "edge_timestamps": [(s, t, ts) for s, t, ts in self._edge_timestamps],
+        }
+
+    def load_state(self, state: dict) -> None:
+        adjacency: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for source, targets in state.get("adjacency", {}).items():
+            for target, weight in targets.items():
+                adjacency[source][target] = int(weight)
+        self._adjacency = adjacency
+        self._edge_timestamps = [
+            (s, t, ts) for s, t, ts in state.get("edge_timestamps", [])
+        ]
