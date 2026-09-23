@@ -26,7 +26,7 @@ function platformColor(platform: string): string {
   return PLATFORM_COLORS[platform.toLowerCase()] || "#71717a";
 }
 
-const PLATFORM_OPTIONS = ["twitter", "telegram", "reddit", "bluesky", "rss", "youtube"];
+const PLATFORM_OPTIONS = ["telegram", "reddit", "bluesky", "rss", "youtube"];
 const TARGET_TYPE_OPTIONS = ["keyword", "handle"];
 
 type Tab = "baseline" | "projects" | "active";
@@ -61,7 +61,7 @@ export default function ProjectConsole({ open, onClose, onProjectsChange }: Proj
 
   const [projectName, setProjectName] = useState("");
   const [projectDesc, setProjectDesc] = useState("");
-  const [targetPlatform, setTargetPlatform] = useState("twitter");
+  const [targetPlatform, setTargetPlatform] = useState("telegram");
   const [targetType, setTargetType] = useState("keyword");
   const [targetValue, setTargetValue] = useState("");
   const [pendingTargets, setPendingTargets] = useState<PendingTarget[]>([]);

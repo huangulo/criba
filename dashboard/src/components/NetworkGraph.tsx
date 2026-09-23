@@ -32,6 +32,13 @@ function nodeRadius(node: NetworkNode): number {
   return Math.max(5, Math.min(20, Math.sqrt(node.degree) * 4));
 }
 
+function tooltipLine(className: string, text: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.className = className;
+  el.textContent = text;
+  return el;
+}
+
 interface SimNode extends NetworkNode, d3.SimulationNodeDatum {}
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   interaction: string;
@@ -205,13 +212,19 @@ export default function NetworkGraph({
         tooltip.style.display = "block";
         tooltip.style.left = `${event.offsetX + 12}px`;
         tooltip.style.top = `${event.offsetY - 8}px`;
-        tooltip.innerHTML = `
-          <div class="font-mono text-text-primary font-semibold text-xs">${d.handle || d.id.slice(0, 8)}</div>
-          <div class="text-text-muted font-mono text-[10px] mt-1">
-            ${d.platform ? d.platform.toUpperCase() : "Unknown"} &middot; Degree: ${d.degree}
-          </div>
-          ${d.is_cluster ? '<div class="text-danger font-mono text-[10px] mt-0.5">Cluster node</div>' : ""}
-        `;
+        tooltip.replaceChildren(
+          tooltipLine(
+            "font-mono text-text-primary font-semibold text-xs",
+            d.handle || d.id.slice(0, 8)
+          ),
+          tooltipLine(
+            "text-text-muted font-mono text-[10px] mt-1",
+            `${d.platform ? d.platform.toUpperCase() : "Unknown"} · Degree: ${d.degree}`
+          ),
+          ...(d.is_cluster
+            ? [tooltipLine("text-danger font-mono text-[10px] mt-0.5", "Cluster node")]
+            : []),
+        );
       })
       .on("mousemove", (event: MouseEvent) => {
         if (!tooltip) return;
