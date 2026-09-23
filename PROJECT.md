@@ -460,6 +460,10 @@ Monitoring targets (channels, feeds, subreddits, keywords, handles) are managed 
 
 The `criba.yml` file is now **infrastructure-only**: Ollama host/model, source `enabled` flags, and poll intervals. All monitoring targets (channels, feeds, subreddits, keywords, handles) are managed exclusively through the `project_targets` table. Source-specific configuration (channels, feeds, subreddits) has been removed from YAML entirely.
 
+### API Authentication
+
+Set `CRIBA_API_KEY` in `.env` to require authentication on every API route: REST calls must send the `X-API-Key` header, and the dashboard WebSocket connects with `?api_key=`. The dashboard image is built with the same key (`NEXT_PUBLIC_API_KEY` build arg), so keep the variable named `CRIBA_API_KEY` for docker compose to inject it into both the API and the dashboard build. When unset, the API runs without authentication (local development only).
+
 ---
 
 ## Development Phases

@@ -1,4 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8030";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (API_KEY) headers.set("X-API-Key", API_KEY);
+  return fetch(`${API_BASE}${path}`, { ...init, headers });
+}
 
 export interface Narrative {
   id: string;
@@ -49,32 +56,33 @@ export interface AlertMessage {
 }
 
 export async function fetchNarratives(projectId: string): Promise<Narrative[]> {
-  const res = await fetch(`${API_BASE}/api/narratives?project_id=${projectId}`);
+  const res = await apiFetch(`/api/narratives?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch narratives");
   return res.json();
 }
 
 export async function fetchCampaigns(projectId: string): Promise<Campaign[]> {
-  const res = await fetch(`${API_BASE}/api/campaigns?project_id=${projectId}`);
+  const res = await apiFetch(`/api/campaigns?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch campaigns");
   return res.json();
 }
 
 export async function fetchFlaggedPosts(projectId: string): Promise<FlaggedPost[]> {
-  const res = await fetch(`${API_BASE}/api/posts/flagged?project_id=${projectId}`);
+  const res = await apiFetch(`/api/posts/flagged?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch flagged posts");
   return res.json();
 }
 
 export async function fetchStats(projectId: string): Promise<StatsSummary> {
-  const res = await fetch(`${API_BASE}/api/stats/summary?project_id=${projectId}`);
+  const res = await apiFetch(`/api/stats/summary?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch stats");
   return res.json();
 }
 
 export function getWsUrl(): string {
   const base = API_BASE.replace(/^http/, "ws");
-  return `${base}/ws/alerts`;
+  const url = `${base}/ws/alerts`;
+  return API_KEY ? `${url}?api_key=${encodeURIComponent(API_KEY)}` : url;
 }
 
 export interface NetworkNode {
@@ -104,7 +112,7 @@ export interface NetworkGraphData {
 }
 
 export async function fetchNetworkGraph(narrativeId: string, projectId: string): Promise<NetworkGraphData> {
-  const res = await fetch(`${API_BASE}/api/network/${narrativeId}?project_id=${projectId}`);
+  const res = await apiFetch(`/api/network/${narrativeId}?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch network graph");
   return res.json();
 }
@@ -152,7 +160,7 @@ export interface CampaignInspectData {
 }
 
 export async function fetchCampaignInspect(campaignId: string, projectId: string): Promise<CampaignInspectData> {
-  const res = await fetch(`${API_BASE}/api/campaigns/${campaignId}/inspect?project_id=${projectId}`);
+  const res = await apiFetch(`/api/campaigns/${campaignId}/inspect?project_id=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch campaign inspection");
   return res.json();
 }
@@ -172,7 +180,7 @@ export interface TestAlertResult {
 }
 
 export async function fetchNotificationSettings(): Promise<NotificationSettings> {
-  const res = await fetch(`${API_BASE}/api/settings/notifications`);
+  const res = await apiFetch(`/api/settings/notifications`);
   if (!res.ok) throw new Error("Failed to fetch notification settings");
   return res.json();
 }
@@ -180,7 +188,7 @@ export async function fetchNotificationSettings(): Promise<NotificationSettings>
 export async function updateNotificationSettings(
   settings: Partial<NotificationSettings>,
 ): Promise<NotificationSettings> {
-  const res = await fetch(`${API_BASE}/api/settings/notifications`, {
+  const res = await apiFetch(`/api/settings/notifications`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
@@ -192,7 +200,7 @@ export async function updateNotificationSettings(
 export async function testAlertConnection(
   channel: "slack" | "discord" | "telegram",
 ): Promise<TestAlertResult> {
-  const res = await fetch(`${API_BASE}/api/alerts/test/${channel}`, {
+  const res = await apiFetch(`/api/alerts/test/${channel}`, {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to test alert connection");
@@ -224,7 +232,7 @@ export async function fetchIngestionLogs(
   if (filters.max_score !== undefined) params.set("max_score", String(filters.max_score));
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   const qs = params.toString();
-  const res = await fetch(`${API_BASE}/api/posts/log?${qs}`);
+  const res = await apiFetch(`/api/posts/log?${qs}`);
   if (!res.ok) throw new Error("Failed to fetch ingestion logs");
   return res.json();
 }
@@ -244,7 +252,7 @@ export interface BaselineSettingsUpdate {
 }
 
 export async function fetchBaselineSettings(): Promise<BaselineSettings> {
-  const res = await fetch(`${API_BASE}/api/settings/baseline`);
+  const res = await apiFetch(`/api/settings/baseline`);
   if (!res.ok) throw new Error("Failed to fetch baseline settings");
   return res.json();
 }
@@ -252,7 +260,7 @@ export async function fetchBaselineSettings(): Promise<BaselineSettings> {
 export async function updateBaselineSettings(
   settings: BaselineSettingsUpdate,
 ): Promise<BaselineSettings> {
-  const res = await fetch(`${API_BASE}/api/settings/baseline`, {
+  const res = await apiFetch(`/api/settings/baseline`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
@@ -287,13 +295,13 @@ export interface ProjectCreate {
 }
 
 export async function fetchProjects(): Promise<Project[]> {
-  const res = await fetch(`${API_BASE}/api/projects`);
+  const res = await apiFetch(`/api/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
   return res.json();
 }
 
 export async function createProject(data: ProjectCreate): Promise<Project> {
-  const res = await fetch(`${API_BASE}/api/projects`, {
+  const res = await apiFetch(`/api/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -303,7 +311,7 @@ export async function createProject(data: ProjectCreate): Promise<Project> {
 }
 
 export async function deleteProject(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/projects/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`/api/projects/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete project");
 }
 
@@ -335,7 +343,7 @@ export async function fetchEvalQueue(
   params.set("project_id", projectId);
   params.set("limit", String(limit));
   params.set("high_frac", String(highFrac));
-  const res = await fetch(`${API_BASE}/api/eval/queue?${params.toString()}`);
+  const res = await apiFetch(`/api/eval/queue?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch eval queue");
   return res.json();
 }
@@ -350,7 +358,7 @@ export async function submitEvalLabel(
   postId: string,
   label: "organic" | "coordinated" | "uncertain",
 ): Promise<EvalLabelResponse> {
-  const res = await fetch(`${API_BASE}/api/eval/label`, {
+  const res = await apiFetch(`/api/eval/label`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ post_id: postId, label }),
@@ -395,7 +403,7 @@ export interface EvalEvidenceResponse {
 }
 
 export async function fetchEvalEvidence(postId: string): Promise<EvalEvidenceResponse> {
-  const res = await fetch(`${API_BASE}/api/eval/evidence/${postId}`);
+  const res = await apiFetch(`/api/eval/evidence/${postId}`);
   if (!res.ok) throw new Error("Failed to fetch eval evidence");
   return res.json();
 }

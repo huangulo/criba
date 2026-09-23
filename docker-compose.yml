@@ -103,6 +103,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8030
+        NEXT_PUBLIC_API_KEY: ${CRIBA_API_KEY:-}
     depends_on:
       - api
     ports:
