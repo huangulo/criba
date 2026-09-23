@@ -62,7 +62,7 @@ class HeuristicScore(Base):
     __tablename__ = "heuristic_scores"
 
     post_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("posts.id"), primary_key=True
+        UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
     )
     copypasta_score: Mapped[float] = mapped_column(Float, default=0.0)
     temporal_anomaly: Mapped[float] = mapped_column(Float, default=0.0)
@@ -78,7 +78,7 @@ class LlmAnalysis(Base):
     __tablename__ = "llm_analysis"
 
     post_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("posts.id"), primary_key=True
+        UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
     )
     coordination_probability: Mapped[float | None] = mapped_column(Float)
     reasoning: Mapped[str | None] = mapped_column(Text)
@@ -113,10 +113,10 @@ class NarrativePost(Base):
     __tablename__ = "narrative_posts"
 
     narrative_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("narratives.id"), primary_key=True
+        UUID(as_uuid=True), ForeignKey("narratives.id", ondelete="CASCADE"), primary_key=True
     )
     post_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("posts.id"), primary_key=True
+        UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
     )
 
 
@@ -157,7 +157,7 @@ class PostEmbedding(Base):
     __tablename__ = "post_embeddings"
 
     post_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("posts.id"), primary_key=True
+        UUID(as_uuid=True), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
     )
     embedding = mapped_column(Vector(768), nullable=False)
     model_used: Mapped[str] = mapped_column(String(100), nullable=False, default="nomic-embed-text")

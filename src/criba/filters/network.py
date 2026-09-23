@@ -39,9 +39,10 @@ class NetworkGraphFilter(BaseFilter):
             if other_author != post.author_id:
                 edges_to_add.append((post.author_id, other_author, "lexical_similarity"))
 
+        # Edges are stored directed so the mutual-connection check below
+        # only counts genuinely reciprocal interactions.
         for source, target, interaction in edges_to_add:
             self._adjacency[source][target] += 1
-            self._adjacency[target][source] += 1
             self._edge_timestamps.append((source, target, now))
 
         self._maybe_prune(now)
@@ -86,16 +87,9 @@ class NetworkGraphFilter(BaseFilter):
         if len(self._edge_timestamps) % 500 != 0:
             return
         cutoff = now - timedelta(hours=EDGE_WINDOW_HOURS)
-        expired_sources = set()
         for source, target, ts in self._edge_timestamps:
-            if ts < cutoff:
-                if source in self._adjacency and target in self._adjacency[source]:
-                    self._adjacency[source][target] -= 1
-                    if self._adjacency[source][target] <= 0:
-                        del self._adjacency[source][target]
-                if target in self._adjacency and source in self._adjacency[target]:
-                    self._adjacency[target][source] -= 1
-                    if self._adjacency[target][source] <= 0:
-                        del self._adjacency[target][source]
-                expired_sources.add((source, target))
+            if ts < cutoff and source in self._adjacency and target in self._adjacency[source]:
+                self._adjacency[source][target] -= 1
+                if self._adjacency[source][target] <= 0:
+                    del self._adjacency[source][target]
         self._edge_timestamps = [(s, t, ts) for s, t, ts in self._edge_timestamps if ts >= cutoff]

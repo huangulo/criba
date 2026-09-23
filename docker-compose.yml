@@ -27,6 +27,16 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    command: alembic upgrade head
+    restart: "no"
+
   worker:
     build: .
     depends_on:
@@ -34,6 +44,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     extra_hosts:
@@ -52,6 +64,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     extra_hosts:
@@ -69,6 +83,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     extra_hosts:

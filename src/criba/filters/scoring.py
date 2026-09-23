@@ -7,18 +7,34 @@ from criba.filters.account_age import AccountAgeFilter
 from criba.filters.hashtag import HashtagCooccurrenceFilter
 from criba.filters.network import NetworkGraphFilter
 
+DEFAULT_SCORING_SETTINGS = {
+    "heuristic_threshold": 0.6,
+    "copypasta_threshold": 10,
+    "temporal_cluster_min": 5,
+    "new_account_days": 7,
+}
 
-def create_pipeline(threshold: float | None = None) -> FilterPipeline:
-    """Create a FilterPipeline with all heuristic filters configured."""
+
+def create_pipeline(
+    threshold: float | None = None,
+    copypasta_threshold: int | None = None,
+    temporal_cluster_min: int | None = None,
+    new_account_days: int | None = None,
+) -> FilterPipeline:
+    """Create a FilterPipeline with all heuristic filters configured.
+
+    Each setting maps to the matching system_settings key; None falls back
+    to the built-in defaults in DEFAULT_SCORING_SETTINGS.
+    """
     if threshold is None:
-        threshold = 0.6  # fallback default; caller should fetch from DB when possible
+        threshold = DEFAULT_SCORING_SETTINGS["heuristic_threshold"]
 
     filters = [
         LanguageFilter(),
         DeduplicationFilter(),
-        CopypastaFilter(),
-        TemporalAnomalyFilter(),
-        AccountAgeFilter(),
+        CopypastaFilter(similar_threshold=copypasta_threshold),
+        TemporalAnomalyFilter(cluster_min=temporal_cluster_min),
+        AccountAgeFilter(new_account_days=new_account_days),
         HashtagCooccurrenceFilter(),
         NetworkGraphFilter(),
     ]
@@ -26,8 +42,8 @@ def create_pipeline(threshold: float | None = None) -> FilterPipeline:
     return FilterPipeline(filters=filters, threshold=threshold)
 
 
-async def get_heuristic_threshold() -> float:
-    """Fetch the heuristic threshold from system_settings."""
+async def get_scoring_settings() -> dict[str, float | int]:
+    """Fetch all heuristic scoring settings from system_settings."""
     from sqlalchemy import select
     from criba.db.connection import get_async_session_factory
     from criba.db.models import SystemSetting
@@ -35,7 +51,16 @@ async def get_heuristic_threshold() -> float:
     session_factory = get_async_session_factory()
     async with session_factory() as session:
         result = await session.execute(
-            select(SystemSetting.value).where(SystemSetting.key == "heuristic_threshold")
+            select(SystemSetting.key, SystemSetting.value).where(
+                SystemSetting.key.in_(DEFAULT_SCORING_SETTINGS)
+            )
         )
-        row = result.scalar_one_or_none()
-        return float(row) if row else 0.6
+        stored = {key: value for key, value in result.all()}
+
+    settings: dict[str, float | int] = {}
+    for key, default in DEFAULT_SCORING_SETTINGS.items():
+        try:
+            settings[key] = type(default)(stored.get(key, default))
+        except (TypeError, ValueError):
+            settings[key] = default
+    return settings

@@ -13,8 +13,8 @@ MODERATE_ACCOUNT_DAYS = 90
 
 class AccountAgeFilter(BaseFilter):
     
-    def __init__(self, new_account_days: int = NEW_ACCOUNT_DAYS):
-        self._new_account_days = new_account_days
+    def __init__(self, new_account_days: int | None = None):
+        self._new_account_days = new_account_days if new_account_days is not None else NEW_ACCOUNT_DAYS
     
     def get_name(self) -> str:
         return "account_age"

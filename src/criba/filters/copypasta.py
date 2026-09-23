@@ -14,6 +14,7 @@ SHINGLE_SIZE = 5
 JACCARD_THRESHOLD = 0.7
 CORPUS_HOURS = 72
 MIN_UNIQUE_AUTHORS = 3
+DEFAULT_SIMILAR_THRESHOLD = 10
 
 
 def _shingle(text: str, k: int = SHINGLE_SIZE) -> set[str]:
@@ -32,7 +33,7 @@ def _create_minhash(shingles: set[str]) -> MinHash:
 
 class _CorpusEntry:
     __slots__ = ("post_id", "author_id", "minhash", "timestamp")
-    
+
     def __init__(self, post_id: str, author_id: str, minhash: MinHash, timestamp: datetime):
         self.post_id = post_id
         self.author_id = author_id
@@ -41,33 +42,36 @@ class _CorpusEntry:
 
 
 class CopypastaFilter(BaseFilter):
-    
-    def __init__(self):
+
+    def __init__(self, similar_threshold: int | None = None):
         self._lsh = MinHashLSH(threshold=JACCARD_THRESHOLD, num_perm=NUM_PERM)
         self._entries: dict[str, _CorpusEntry] = {}
         self._last_prune: datetime = datetime.now(timezone.utc)
-    
+        self._similar_threshold = (
+            similar_threshold if similar_threshold is not None else DEFAULT_SIMILAR_THRESHOLD
+        )
+
     def get_name(self) -> str:
         return "copypasta"
-    
+
     @property
     def weight(self) -> float:
         return 1.5
-    
+
     async def apply(self, post: RawPost, context: dict) -> FilterResult:
         self._maybe_prune()
-        
+
         shingles = _shingle(post.content)
         if not shingles:
             return FilterResult(score=0.0, flagged=False)
-        
+
         mh = _create_minhash(shingles)
         matches = self._lsh.query(mh)
-        
+
         unique_authors: set[str] = set()
         max_jaccard = 0.0
         similar_count = 0
-        
+
         for match_key in matches:
             entry = self._entries.get(match_key)
             if entry is None or entry.author_id == post.author_id:
@@ -76,10 +80,10 @@ class CopypastaFilter(BaseFilter):
             jaccard = mh.jaccard(entry.minhash)
             max_jaccard = max(max_jaccard, jaccard)
             similar_count += 1
-        
+
         unique_count = len(unique_authors)
-        flagged = unique_count >= MIN_UNIQUE_AUTHORS
-        
+        flagged = similar_count >= self._similar_threshold or unique_count >= MIN_UNIQUE_AUTHORS
+
         if unique_count >= 6:
             score = 1.0
         elif unique_count >= 3:
@@ -88,7 +92,7 @@ class CopypastaFilter(BaseFilter):
             score = 0.3
         else:
             score = 0.0
-        
+
         key = f"{post.source}:{post.source_id}"
         self._entries[key] = _CorpusEntry(
             post_id=post.source_id,
@@ -97,7 +101,7 @@ class CopypastaFilter(BaseFilter):
             timestamp=datetime.now(timezone.utc),
         )
         self._lsh.insert(key, mh)
-        
+
         return FilterResult(
             score=score,
             flagged=flagged,
@@ -108,19 +112,19 @@ class CopypastaFilter(BaseFilter):
                 "copypasta_author_list": list(unique_authors),
             },
         )
-    
+
     def _maybe_prune(self) -> None:
         now = datetime.now(timezone.utc)
         if now - self._last_prune < timedelta(hours=1):
             return
-        
+
         cutoff = now - timedelta(hours=CORPUS_HOURS)
         expired = [k for k, v in self._entries.items() if v.timestamp < cutoff]
-        
+
         for key in expired:
             self._lsh.remove(key)
             del self._entries[key]
-        
+
         if expired:
             logger.info("Pruned %d expired copypasta entries", len(expired))
         self._last_prune = now

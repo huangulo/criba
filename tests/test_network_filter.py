@@ -37,13 +37,36 @@ async def test_reply_creates_edge(make_post):
 
 
 @pytest.mark.asyncio
+async def test_one_way_mentions_are_not_reciprocal(make_post):
+    """One-way mentions must not count as mutual connections."""
+    filter = NetworkGraphFilter()
+    context = {}
+    post = make_post(
+        author_id="author1",
+        source_id="post_1",
+        mentions=["user2", "user3", "user4", "user5", "user6"],
+    )
+    result = await filter.apply(post, context)
+    assert result.metadata["network_neighbor_count"] == 5
+    assert result.metadata["network_mutual_connections"] == 0
+    assert result.score == 0.0
+    assert result.flagged is False
+
+
+@pytest.mark.asyncio
 async def test_tight_cluster_detection(make_post):
     filter = NetworkGraphFilter()
     context = {}
+    # users 2..7 each mention user1 (user_i -> user1 edges)
     for i in range(2, 8):
         post = make_post(author_id=f"user{i}", source_id=f"post_{i}", mentions=["user1"])
         await filter.apply(post, context)
-    final_post = make_post(mentions=["user2", "user3", "user4", "user5", "user6"])
+    # user1 mentions five of them back: genuinely reciprocal links
+    final_post = make_post(
+        author_id="user1",
+        source_id="post_final",
+        mentions=["user2", "user3", "user4", "user5", "user6"],
+    )
     result = await filter.apply(final_post, context)
     assert result.score >= 0.8
     assert result.flagged is True
@@ -55,7 +78,7 @@ async def test_bidirectional_edges(make_post):
     filter = NetworkGraphFilter()
     context = {}
     post1 = make_post(author_id="user1", source_id="post_1", mentions=["user2"])
-    result1 = await filter.apply(post1, context)
+    await filter.apply(post1, context)
     post2 = make_post(author_id="user2", source_id="post_2", mentions=["user1"])
     result2 = await filter.apply(post2, context)
     assert result2.metadata["network_mutual_connections"] >= 1
@@ -77,7 +100,11 @@ async def test_moderate_mutual_connections_score(make_post):
     for i in range(2, 5):
         post = make_post(author_id=f"user{i}", source_id=f"post_{i}", mentions=["user1"])
         await filter.apply(post, context)
-    final_post = make_post(mentions=["user2", "user3", "user4"])
+    final_post = make_post(
+        author_id="user1",
+        source_id="post_final",
+        mentions=["user2", "user3", "user4"],
+    )
     result = await filter.apply(final_post, context)
     assert result.score == 0.4
     assert result.flagged is False
