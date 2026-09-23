@@ -129,31 +129,52 @@ async def _send_campaign_alert_async(campaign_data: dict) -> dict:
     msg = _build_message(campaign_data)
     msg["timestamp"] = campaign_data.get("detected_at", "")
 
-    results = {}
+    results: dict[str, bool] = {}
+    raised: list[Exception] = []
+
+    async def attempt(name: str, send) -> None:
+        """Send to one channel; its failure must never block the others."""
+        try:
+            results[name] = await send()
+        except Exception as exc:
+            logger.exception("%s alert raised; continuing with the other channels", name.capitalize())
+            results[name] = False
+            raised.append(exc)
 
     if notif.get("slack_webhook_url"):
+        slack_webhook = notif["slack_webhook_url"]
         try:
-            await assert_public_http_url(notif["slack_webhook_url"])
+            await assert_public_http_url(slack_webhook)
         except ValueError as exc:
             logger.error("Slack webhook rejected: %s", exc)
             results["slack"] = False
         else:
-            results["slack"] = await _send_slack(notif["slack_webhook_url"], msg)
+            await attempt("slack", lambda: _send_slack(slack_webhook, msg))
     if notif.get("discord_webhook_url"):
+        discord_webhook = notif["discord_webhook_url"]
         try:
-            await assert_public_http_url(notif["discord_webhook_url"])
+            await assert_public_http_url(discord_webhook)
         except ValueError as exc:
             logger.error("Discord webhook rejected: %s", exc)
             results["discord"] = False
         else:
-            results["discord"] = await _send_discord(notif["discord_webhook_url"], msg)
+            await attempt("discord", lambda: _send_discord(discord_webhook, msg))
     if notif.get("telegram_bot_token") and notif.get("telegram_chat_id"):
-        results["telegram"] = await _send_telegram(
-            notif["telegram_bot_token"], notif["telegram_chat_id"], msg
-        )
+        bot_token = notif["telegram_bot_token"]
+        telegram_chat_id = notif["telegram_chat_id"]
+        await attempt("telegram", lambda: _send_telegram(bot_token, telegram_chat_id, msg))
 
     if not results:
         logger.info("No notification channels configured, skipping alerts")
+        return results
+
+    if not any(results.values()) and raised:
+        # Every configured channel failed and at least one failed with a
+        # transient error: re-raise so the Celery task retries instead of
+        # silently losing the alert. Channels that only returned False
+        # (rejected webhook URL, bad HTTP status) are permanently broken;
+        # retrying cannot fix them, so those results are returned as-is.
+        raise raised[-1]
 
     return results
 
@@ -167,7 +188,18 @@ def send_campaign_alert(self, campaign_data: dict) -> dict:
         raise self.retry(exc=exc)
 
 
+async def _attempt_test(channel: str, send) -> dict:
+    """Run one test send; report the failure instead of raising it to the API."""
+    try:
+        return {"channel": channel, "success": await send()}
+    except Exception as exc:
+        logger.exception("Test alert to %s failed", channel)
+        return {"channel": channel, "success": False, "error": str(exc)}
+
+
 async def send_test_alert(channel: str) -> dict:
+    from criba.utils.net import assert_public_http_url
+
     notif = await _get_notification_settings()
 
     test_msg = {
@@ -182,13 +214,22 @@ async def send_test_alert(channel: str) -> dict:
     }
 
     if channel == "slack" and notif.get("slack_webhook_url"):
-        success = await _send_slack(notif["slack_webhook_url"], test_msg)
-        return {"channel": "slack", "success": success}
+        webhook = notif["slack_webhook_url"]
+        try:
+            await assert_public_http_url(webhook)
+        except ValueError as exc:
+            return {"channel": channel, "success": False, "error": f"Webhook rejected: {exc}"}
+        return await _attempt_test(channel, lambda: _send_slack(webhook, test_msg))
     elif channel == "discord" and notif.get("discord_webhook_url"):
-        success = await _send_discord(notif["discord_webhook_url"], test_msg)
-        return {"channel": "discord", "success": success}
+        webhook = notif["discord_webhook_url"]
+        try:
+            await assert_public_http_url(webhook)
+        except ValueError as exc:
+            return {"channel": channel, "success": False, "error": f"Webhook rejected: {exc}"}
+        return await _attempt_test(channel, lambda: _send_discord(webhook, test_msg))
     elif channel == "telegram" and notif.get("telegram_bot_token") and notif.get("telegram_chat_id"):
-        success = await _send_telegram(notif["telegram_bot_token"], notif["telegram_chat_id"], test_msg)
-        return {"channel": "telegram", "success": success}
+        bot_token = notif["telegram_bot_token"]
+        chat_id = notif["telegram_chat_id"]
+        return await _attempt_test(channel, lambda: _send_telegram(bot_token, chat_id, test_msg))
     else:
         return {"channel": channel, "success": False, "error": "Channel not configured"}
