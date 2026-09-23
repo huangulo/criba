@@ -140,8 +140,6 @@ class NarrativeEngine:
         return "Unnamed narrative"
 
     async def detect_campaigns(self, project_id: uuid.UUID) -> dict:
-        existing_campaign_narratives = select(Campaign.id)
-
         stmt = (
             select(Narrative)
             .where(Narrative.status == "active")
@@ -150,7 +148,7 @@ class NarrativeEngine:
             .where(Narrative.project_id == project_id)
         )
         result = await self._session.execute(stmt)
-        candidates = result.all()
+        candidates = result.scalars().all()
 
         detected = 0
         skipped = 0

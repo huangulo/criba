@@ -37,12 +37,14 @@ class OllamaClient:
             },
         }
         
+        raw_response = ""
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                raw_response = data.get("message", {}).get("content", "")
+                if isinstance(data, dict) and isinstance(data.get("message"), dict):
+                    raw_response = data["message"].get("content") or ""
                 return json.loads(self._strip_thinking(raw_response))
         except json.JSONDecodeError:
             logger.warning("Ollama returned non-JSON response: %s", raw_response[:200])

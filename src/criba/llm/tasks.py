@@ -82,6 +82,8 @@ async def _analyze_flagged_posts_async() -> dict:
                     coordination_prob = float(coordination_prob)
                 except (ValueError, TypeError):
                     coordination_prob = 0.0
+            elif not isinstance(coordination_prob, (int, float)):
+                coordination_prob = 0.0
 
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
