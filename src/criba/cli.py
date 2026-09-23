@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 import csv
+import getpass
+import os
 import sys
 import uuid
 
@@ -304,9 +306,65 @@ async def _run(args: argparse.Namespace) -> None:
         print(f"  precision {p3:.3f}  recall {r3:.3f}  f1 {f3:.3f}")
 
 
+async def _login_telegram() -> None:
+    """Create a Telegram session file for the worker, interactively.
+
+    The polling worker cannot do interactive auth (one-time login codes),
+    so this command runs the send_code_request -> sign_in flow once and
+    saves the session to TELEGRAM_SESSION_PATH.
+    """
+    from telethon import TelegramClient
+    from telethon.errors import PhoneCodeInvalidError, SessionPasswordNeededError
+
+    api_id = int(os.environ.get("TELEGRAM_API_ID", "0"))
+    api_hash = os.environ.get("TELEGRAM_API_HASH", "")
+    phone = os.environ.get("TELEGRAM_PHONE", "")
+    session_path = os.environ.get("TELEGRAM_SESSION_PATH", "telegram_session")
+
+    if not api_id or not api_hash:
+        print("Error: TELEGRAM_API_ID and TELEGRAM_API_HASH must be set.", file=sys.stderr)
+        sys.exit(1)
+    if not phone:
+        print("Error: TELEGRAM_PHONE must be set (international format, e.g. +573001234567).", file=sys.stderr)
+        sys.exit(1)
+
+    session_file = session_path if session_path.endswith(".session") else f"{session_path}.session"
+
+    client = TelegramClient(session_path, api_id, api_hash)
+    await client.connect()
+    try:
+        if await client.is_user_authorized():
+            me = await client.get_me()
+            print(f"Session already authorized ({getattr(me, 'username', None) or phone}); nothing to do.")
+            return
+
+        print(f"Requesting a login code for {phone} ...")
+        await client.send_code_request(phone)
+
+        code = os.environ.get("TELEGRAM_CODE", "").strip() or input("Enter the login code: ").strip()
+        try:
+            await client.sign_in(phone, code)
+        except SessionPasswordNeededError:
+            await client.sign_in(password=getpass.getpass("Two-factor password: "))
+        except PhoneCodeInvalidError:
+            print("Error: the login code was rejected. Wait for a fresh code and try again.", file=sys.stderr)
+            sys.exit(1)
+
+        me = await client.get_me()
+        print(f"Logged in as {getattr(me, 'username', None) or phone}.")
+        print(f"Session saved to {session_file}; the worker picks it up via TELEGRAM_SESSION_PATH.")
+    finally:
+        await client.disconnect()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="criba", description="Criba CLI")
     subparsers = parser.add_subparsers(dest="command")
+
+    login_parser = subparsers.add_parser("login", help="Interactive login for sources that need credentials")
+    login_sub = login_parser.add_subparsers(dest="login_command")
+
+    login_sub.add_parser("telegram", help="Create the Telegram session file used by the worker")
 
     eval_parser = subparsers.add_parser("eval", help="Evaluation harness commands")
     eval_sub = eval_parser.add_subparsers(dest="eval_command")
@@ -327,7 +385,13 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
 
-    if args.command == "eval":
+    if args.command == "login":
+        if args.login_command == "telegram":
+            asyncio.run(_login_telegram())
+        else:
+            login_parser.print_help()
+            sys.exit(1)
+    elif args.command == "eval":
         if args.eval_command == "export":
             asyncio.run(_export(args))
         elif args.eval_command == "import":

@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.errors import FloodWaitError
 from telethon.tl.types import Message, Channel
 
 from criba.models.raw_post import RawPost
@@ -78,24 +78,18 @@ class TelegramPlugin(SourcePlugin):
             await self._client.connect()
 
             if not await self._client.is_user_authorized():
-                phone = os.environ.get("TELEGRAM_PHONE", "")
-                code = os.environ.get("TELEGRAM_CODE", "")
-                if phone and code:
-                    try:
-                        await self._client.sign_in(phone, code)
-                    except Exception as exc:
-                        logger.error("Telegram sign-in failed: %s", exc)
-                        await self._client.disconnect()
-                        self._client = None
-                        return None
-                else:
-                    logger.warning(
-                        "Telegram auth required but TELEGRAM_CODE not set. "
-                        "Set TELEGRAM_CODE or run interactive auth setup. Skipping."
-                    )
-                    await self._client.disconnect()
-                    self._client = None
-                    return None
+                # One-time login codes and interactive auth cannot happen
+                # inside a polling worker; fail fast and point at the
+                # command that creates the session file.
+                logger.warning(
+                    "Telegram session %s is not authorized. Run 'criba login telegram' "
+                    "once (with TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_PHONE "
+                    "set) to create the session, then restart the worker. Skipping.",
+                    session_name,
+                )
+                await self._client.disconnect()
+                self._client = None
+                return None
 
             self._client_loop = current_loop
             logger.info("Telegram client connected and authorized")
