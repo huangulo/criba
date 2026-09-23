@@ -43,11 +43,12 @@ class NarrativeEngine:
         for post, analysis, embedding in rows:
             best_narrative = await self._find_matching_narrative(embedding.embedding, project_id)
 
-            if best_narrative is None:
+            is_new_narrative = best_narrative is None
+            if is_new_narrative:
                 best_narrative = await self._create_narrative(post, analysis, embedding, project_id)
                 new_narratives += 1
             else:
-                await self._update_narrative(best_narrative, post, analysis, embedding)
+                await self._update_narrative(best_narrative, post, analysis)
                 updated_narratives += 1
 
             link_stmt = pg_insert(NarrativePost).values(
@@ -55,6 +56,12 @@ class NarrativeEngine:
                 post_id=post.id,
             ).on_conflict_do_nothing()
             await self._session.execute(link_stmt)
+
+            # Recount platform spread only after the membership link exists,
+            # then commit narrative changes and the membership together.
+            if not is_new_narrative:
+                best_narrative.platform_spread = await self._count_platform_spread(best_narrative.id)
+
             await self._session.commit()
             clustered += 1
 
@@ -105,10 +112,11 @@ class NarrativeEngine:
             project_id=project_id,
         )
         self._session.add(narrative)
-        await self._session.commit()
+        await self._session.flush()
         return narrative
 
-    async def _update_narrative(self, narrative: Narrative, post: Post, analysis: LlmAnalysis, embedding: PostEmbedding) -> None:
+    async def _update_narrative(self, narrative: Narrative, post: Post, analysis: LlmAnalysis) -> None:
+        """Update narrative fields; the caller commits together with the membership link."""
         if narrative.first_seen is None or post.published_at < narrative.first_seen:
             narrative.first_seen = post.published_at
         if narrative.last_seen is None or post.published_at > narrative.last_seen:
@@ -120,16 +128,14 @@ class NarrativeEngine:
         if new_label and (not narrative.label or narrative.label.startswith("Narrative ")):
             narrative.label = new_label
 
-        await self._session.commit()
-
-        recount_stmt = (
+    async def _count_platform_spread(self, narrative_id: uuid.UUID) -> int:
+        stmt = (
             select(func.count(func.distinct(Post.source)))
             .join(NarrativePost, Post.id == NarrativePost.post_id)
-            .where(NarrativePost.narrative_id == narrative.id)
+            .where(NarrativePost.narrative_id == narrative_id)
         )
-        result = await self._session.execute(recount_stmt)
-        narrative.platform_spread = result.scalar_one()
-        await self._session.commit()
+        result = await self._session.execute(stmt)
+        return result.scalar_one()
 
     def _derive_label(self, analysis: LlmAnalysis) -> str:
         if analysis.talking_points and len(analysis.talking_points) > 0:

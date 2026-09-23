@@ -778,13 +778,15 @@ async def get_eval_queue(
     high_q = base.order_by(HeuristicScore.composite_score.desc()).limit(n_high * fetch_multiplier)
     low_q = base.order_by(HeuristicScore.composite_score.asc()).limit(n_low * fetch_multiplier)
 
-    union_q = high_q.union(low_q).subquery()
-    rows = (await session.execute(select(union_q))).fetchall()
+    # Query the strata separately: SQL UNION does not preserve the ORDER BY
+    # of its inputs, so a single unordered union cannot be split back into
+    # high- and low-score samples by row position.
+    high_rows = (await session.execute(high_q)).fetchall()
+    low_rows = (await session.execute(low_q)).fetchall()
 
     seen: set[uuid.UUID] = set()
     high_survivors = []
-    low_survivors = []
-    for row in rows:
+    for row in high_rows:
         if row[0] in seen:
             continue
         seen.add(row[0])
@@ -793,10 +795,19 @@ async def get_eval_queue(
         if len(high_survivors) < n_high:
             high_survivors.append(row)
         else:
-            low_survivors.append(row)
+            break
 
-    high_survivors = high_survivors[:n_high]
-    low_survivors = low_survivors[:n_low]
+    low_survivors = []
+    for row in low_rows:
+        if row[0] in seen:
+            continue
+        seen.add(row[0])
+        if is_junk(row[5], min_words):
+            continue
+        if len(low_survivors) < n_low:
+            low_survivors.append(row)
+        else:
+            break
 
     remaining = (
         await session.execute(
