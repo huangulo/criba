@@ -123,6 +123,8 @@ async def _get_notification_settings() -> dict[str, str]:
 
 
 async def _send_campaign_alert_async(campaign_data: dict) -> dict:
+    from criba.utils.net import assert_public_http_url
+
     notif = await _get_notification_settings()
     msg = _build_message(campaign_data)
     msg["timestamp"] = campaign_data.get("detected_at", "")
@@ -130,9 +132,21 @@ async def _send_campaign_alert_async(campaign_data: dict) -> dict:
     results = {}
 
     if notif.get("slack_webhook_url"):
-        results["slack"] = await _send_slack(notif["slack_webhook_url"], msg)
+        try:
+            await assert_public_http_url(notif["slack_webhook_url"])
+        except ValueError as exc:
+            logger.error("Slack webhook rejected: %s", exc)
+            results["slack"] = False
+        else:
+            results["slack"] = await _send_slack(notif["slack_webhook_url"], msg)
     if notif.get("discord_webhook_url"):
-        results["discord"] = await _send_discord(notif["discord_webhook_url"], msg)
+        try:
+            await assert_public_http_url(notif["discord_webhook_url"])
+        except ValueError as exc:
+            logger.error("Discord webhook rejected: %s", exc)
+            results["discord"] = False
+        else:
+            results["discord"] = await _send_discord(notif["discord_webhook_url"], msg)
     if notif.get("telegram_bot_token") and notif.get("telegram_chat_id"):
         results["telegram"] = await _send_telegram(
             notif["telegram_bot_token"], notif["telegram_chat_id"], msg

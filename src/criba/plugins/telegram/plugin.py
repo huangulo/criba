@@ -145,9 +145,13 @@ class TelegramPlugin(SourcePlugin):
         if message.chat and hasattr(message.chat, "username") and message.chat.username:
             url = f"https://t.me/{message.chat.username}/{message.id}"
 
+        # Message IDs are only unique within a chat, so source IDs and
+        # reply_to references must be scoped by the chat they belong to.
+        chat_id = message.chat_id if message.chat_id is not None else channel_name
+
         return RawPost(
             source="telegram",
-            source_id=str(message.id),
+            source_id=f"{chat_id}:{message.id}",
             author_id=author_id,
             author_handle=author_handle,
             author_created_at=author_created_at,
@@ -158,7 +162,7 @@ class TelegramPlugin(SourcePlugin):
             engagement=engagement,
             hashtags=hashtags,
             mentions=mentions,
-            reply_to=str(message.reply_to.reply_to_msg_id) if message.reply_to else None,
+            reply_to=f"{chat_id}:{message.reply_to.reply_to_msg_id}" if message.reply_to else None,
             media_urls=media_urls,
             raw_metadata={
                 "channel": channel_name,

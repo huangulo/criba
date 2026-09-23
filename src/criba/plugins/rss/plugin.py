@@ -27,17 +27,32 @@ def _strip_html(text: str) -> str:
 
 
 def _parse_date(entry) -> datetime | None:
-    """Parse publication date from RSS entry."""
-    for field in ("published", "updated", "created"):
+    """Parse publication date from an RSS/Atom entry.
+
+    Prefers feedparser's normalized *_parsed time tuples, which it fills
+    for both RFC 2822 (RSS) and ISO 8601 (Atom) dates; falls back to parsing
+    the raw string fields with either date format.
+    """
+    for field in ("published_parsed", "updated_parsed", "created_parsed"):
         value = getattr(entry, field, None)
         if value:
             try:
-                if isinstance(value, str):
-                    return parsedate_to_datetime(value)
-                elif hasattr(value, "timetuple"):
-                    return datetime(*value.timetuple()[:6], tzinfo=timezone.utc)
+                return datetime(*value[:6], tzinfo=timezone.utc)
             except (ValueError, TypeError):
                 continue
+    for field in ("published", "updated", "created"):
+        value = getattr(entry, field, None)
+        if not isinstance(value, str) or not value:
+            continue
+        for parser in (parsedate_to_datetime, datetime.fromisoformat):
+            try:
+                parsed = parser(value)
+            except (ValueError, TypeError):
+                continue
+            if parsed is not None:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed
     return None
 
 
@@ -140,15 +155,22 @@ class RSSPlugin(SourcePlugin):
 
     async def stream(self, config: dict) -> AsyncIterator[RawPost]:
         """Stream posts from configured RSS feeds."""
+        from criba.utils.net import assert_public_http_url
+
         feeds = config.get("feeds", [])
         if not feeds:
             logger.warning("No RSS feeds configured")
             return
 
+        async def guard_request(request: httpx.Request) -> None:
+            """httpx event hook: refuse requests to non-public destinations."""
+            await assert_public_http_url(str(request.url))
+
         async with httpx.AsyncClient(
             timeout=30.0,
             follow_redirects=True,
             headers={"User-Agent": "Criba/0.1.0 (OSINT Bot)"},
+            event_hooks={"request": [guard_request]},
         ) as client:
             for feed_config in feeds:
                 feed_name = feed_config.get("name", "unknown")
@@ -156,6 +178,12 @@ class RSSPlugin(SourcePlugin):
 
                 if not feed_url:
                     logger.warning("RSS feed %s has no URL, skipping", feed_name)
+                    continue
+
+                try:
+                    await assert_public_http_url(feed_url)
+                except ValueError as exc:
+                    logger.warning("Refusing to fetch RSS feed %s: %s", feed_name, exc)
                     continue
 
                 try:

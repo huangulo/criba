@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import logging
@@ -13,6 +14,21 @@ logger = logging.getLogger(__name__)
 
 HASHTAG_RE = re.compile(r"#(\w+)")
 MENTION_RE = re.compile(r"@(\w+)")
+
+QUOTA_REASONS = {"quotaExceeded", "rateLimitExceeded", "dailyLimitExceeded"}
+
+
+def _quota_reason(exc: HttpError) -> str:
+    try:
+        content = exc.content.decode("utf-8", "replace") if isinstance(exc.content, bytes) else exc.content
+        errors = json.loads(content).get("error", {}).get("errors", [])
+        return errors[0].get("reason", "") if errors else ""
+    except (AttributeError, TypeError, ValueError):
+        return ""
+
+
+def _is_quota_error(exc: HttpError) -> bool:
+    return _quota_reason(exc) in QUOTA_REASONS
 
 
 class YouTubePlugin(SourcePlugin):
@@ -137,14 +153,24 @@ class YouTubePlugin(SourcePlugin):
                     order="date",
                     maxResults=10,
                 ).execute()
+            except HttpError as exc:
+                if exc.status_code == 403 and _is_quota_error(exc):
+                    logger.warning("YouTube API quota exceeded, stopping stream")
+                    return
+                logger.error("YouTube API error for channel %s: %s", channel_id, exc)
+                continue
+            except Exception:
+                logger.exception("Error fetching YouTube data from channel %s", channel_id)
+                continue
 
-                videos = videos_response.get("items", [])
-                for video in videos:
-                    video_id = video.get("id", {}).get("videoId", "")
-                    video_title = video.get("snippet", {}).get("title", "")
-                    if not video_id:
-                        continue
+            videos = videos_response.get("items", [])
+            for video in videos:
+                video_id = video.get("id", {}).get("videoId", "")
+                video_title = video.get("snippet", {}).get("title", "")
+                if not video_id:
+                    continue
 
+                try:
                     logger.info("Fetching comments for video: %s", video_id)
                     comments_response = youtube.commentThreads().list(
                         part="snippet,replies",
@@ -152,35 +178,40 @@ class YouTubePlugin(SourcePlugin):
                         maxResults=50,
                         textFormat="plainText",
                     ).execute()
+                except HttpError as exc:
+                    if exc.status_code == 403 and _is_quota_error(exc):
+                        logger.warning("YouTube API quota exceeded, stopping stream")
+                        return
+                    # A 403 with a non-quota reason (e.g. comments disabled on
+                    # the video) must only skip this video, not the whole run.
+                    logger.warning(
+                        "Skipping comments for video %s: HTTP %s (%s)",
+                        video_id, exc.status_code, _quota_reason(exc) or "unknown reason",
+                    )
+                    continue
+                except Exception:
+                    logger.exception("Error fetching comments for video %s", video_id)
+                    continue
 
-                    comment_threads = comments_response.get("items", [])
-                    for thread in comment_threads:
-                        top_level_comment = thread.get("snippet", {}).get("topLevelComment", {})
-                        if top_level_comment:
-                            yield self._comment_to_raw_post(
-                                top_level_comment,
-                                video_id,
-                                video_title,
-                                reply_to=None,
-                                is_reply_comment=False,
-                            )
+                comment_threads = comments_response.get("items", [])
+                for thread in comment_threads:
+                    top_level_comment = thread.get("snippet", {}).get("topLevelComment", {})
+                    if top_level_comment:
+                        yield self._comment_to_raw_post(
+                            top_level_comment,
+                            video_id,
+                            video_title,
+                            reply_to=None,
+                            is_reply_comment=False,
+                        )
 
-                        top_comment_id = top_level_comment.get("id", "") if top_level_comment else None
-                        replies = thread.get("replies", {}).get("comments", [])
-                        for reply in replies:
-                            yield self._comment_to_raw_post(
-                                reply,
-                                video_id,
-                                video_title,
-                                reply_to=top_comment_id,
-                                is_reply_comment=True,
-                            )
-
-            except HttpError as exc:
-                if exc.status_code == 403:
-                    logger.warning("YouTube API quota exceeded, stopping stream")
-                    return
-                else:
-                    logger.error("YouTube API error for channel %s: %s", channel_id, exc)
-            except Exception:
-                logger.exception("Error fetching YouTube data from channel %s", channel_id)
+                    top_comment_id = top_level_comment.get("id", "") if top_level_comment else None
+                    replies = thread.get("replies", {}).get("comments", [])
+                    for reply in replies:
+                        yield self._comment_to_raw_post(
+                            reply,
+                            video_id,
+                            video_title,
+                            reply_to=top_comment_id,
+                            is_reply_comment=True,
+                        )
