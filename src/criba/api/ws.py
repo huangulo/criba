@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import json
 import logging
+import os
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -54,3 +56,49 @@ async def alerts_ws(ws: WebSocket):
 
 async def broadcast_alert(event_type: str, message: str, data: dict):
     await manager.broadcast(event_type, message, data)
+
+
+async def alerts_subscriber() -> None:
+    """Relay alert events from the Redis pub/sub channel to connected dashboards.
+
+    The worker publishes campaign alerts to Redis; this loop bridges them to
+    every open WebSocket. It reconnects after failures so a Redis restart
+    never takes the live-alert fan-out down with it.
+    """
+    from redis import asyncio as aioredis
+
+    from criba.utils.alerts_bus import ALERTS_CHANNEL
+
+    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    while True:
+        client = None
+        pubsub = None
+        try:
+            client = aioredis.from_url(url)
+            pubsub = client.pubsub()
+            await pubsub.subscribe(ALERTS_CHANNEL)
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                try:
+                    event = json.loads(message["data"])
+                except (TypeError, ValueError):
+                    logger.warning("Ignoring malformed alert event: %r", message.get("data"))
+                    continue
+                await manager.broadcast(
+                    event.get("event_type", "alert"),
+                    event.get("message", ""),
+                    event.get("data") or {},
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Alerts Redis subscriber failed; retrying in 5s")
+            await asyncio.sleep(5)
+        finally:
+            if pubsub is not None:
+                with contextlib.suppress(Exception):
+                    await pubsub.aclose()
+            if client is not None:
+                with contextlib.suppress(Exception):
+                    await client.aclose()

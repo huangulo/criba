@@ -244,3 +244,30 @@ def save_config(config: CribaConfig, path: str = "criba.yml") -> None:
 
     with open(config_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def load_infra_config() -> CribaConfig:
+    """Load criba.yml, falling back to built-in defaults when it is missing or invalid.
+
+    Used by infrastructure entry points (Celery beat schedule, Ollama client
+    configuration) that must start even when no config file is present.
+    """
+    import logging
+
+    try:
+        return load_config()
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to load criba.yml; using built-in defaults")
+        return CribaConfig(
+            general=GeneralConfig(language="es", timezone="America/Bogota", heuristic_threshold=0.6),
+            ollama=OllamaConfig(host="http://localhost:11434", model="qwen2.5:14b", timeout=30),
+            sources=SourcesConfig(
+                telegram=SourceConfig(enabled=True, channels=[], poll_interval=60),
+                reddit=SourceConfig(enabled=True, channels=[], poll_interval=120),
+                rss=RssSourceConfig(enabled=True, feeds=[], poll_interval=300),
+                bluesky=BlueskySourceConfig(enabled=True, keywords=[], handles=[], poll_interval=120),
+                youtube=YoutubeSourceConfig(enabled=True, channels=[], poll_interval=900),
+            ),
+            alerts=AlertsConfig(copypasta_threshold=10, temporal_cluster_min=5, new_account_days=7),
+            notifications=NotificationConfig(),
+        )

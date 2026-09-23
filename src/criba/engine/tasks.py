@@ -172,7 +172,7 @@ async def _detect_campaigns_async() -> dict:
                     campaign = await session.get(Campaign, campaign_id)
                     if campaign and (campaign.confidence or 0) >= threshold:
                         from criba.worker.alerts import send_campaign_alert
-                        send_campaign_alert.delay({
+                        alert_payload = {
                             "id": str(campaign.id),
                             "label": campaign.label,
                             "confidence": campaign.confidence,
@@ -180,7 +180,17 @@ async def _detect_campaigns_async() -> dict:
                             "account_count": campaign.account_count,
                             "post_count": campaign.post_count,
                             "detected_at": campaign.detected_at.isoformat() if campaign.detected_at else "",
-                        })
+                        }
+                        send_campaign_alert.delay(alert_payload)
+                        try:
+                            from criba.utils.alerts_bus import publish_alert
+                            await publish_alert(
+                                "campaign_detected",
+                                f"Campaign detected: {campaign.label or 'unnamed campaign'}",
+                                alert_payload,
+                            )
+                        except Exception:
+                            logger.exception("Failed to publish campaign alert to the live bus")
                         logger.info("Triggered alert for campaign %s (confidence=%.2f)", campaign.id, campaign.confidence)
 
     logger.info("Campaign detection result: %s", total_result)

@@ -13,9 +13,15 @@ class OllamaEmbeddingClient:
     DEFAULT_TIMEOUT = 30
 
     def __init__(self, host: str | None = None, model: str | None = None, timeout: int | None = None):
-        self._host = host or os.getenv("OLLAMA_HOST", self.DEFAULT_HOST)
-        self._model = model or os.getenv("OLLAMA_EMBED_MODEL", self.DEFAULT_MODEL)
-        self._timeout = timeout or int(os.getenv("OLLAMA_TIMEOUT", str(self.DEFAULT_TIMEOUT)))
+        # host/timeout follow param > env > criba.yml > defaults; the embed
+        # model stays independent of the chat model configured in criba.yml.
+        from criba.config import load_infra_config
+
+        infra = load_infra_config().ollama
+        self._host = host or os.getenv("OLLAMA_HOST") or infra.host
+        self._model = model or os.getenv("OLLAMA_EMBED_MODEL") or self.DEFAULT_MODEL
+        env_timeout = os.getenv("OLLAMA_TIMEOUT")
+        self._timeout = timeout or (int(env_timeout) if env_timeout else infra.timeout)
 
     async def embed(self, text: str) -> list[float] | None:
         url = f"{self._host}/api/embed"

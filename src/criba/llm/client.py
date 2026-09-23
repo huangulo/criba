@@ -20,9 +20,16 @@ class OllamaClient:
         model: str | None = None,
         timeout: int | None = None,
     ):
-        self._host = host or os.getenv("OLLAMA_HOST", DEFAULT_HOST)
-        self._model = model or os.getenv("OLLAMA_MODEL", DEFAULT_MODEL)
-        self._timeout = timeout or int(os.getenv("OLLAMA_TIMEOUT", str(DEFAULT_TIMEOUT)))
+        # Precedence: explicit argument, then environment, then criba.yml,
+        # then built-in defaults. A missing or broken criba.yml never breaks
+        # the client: load_infra_config falls back to safe defaults.
+        from criba.config import load_infra_config
+
+        infra = load_infra_config().ollama
+        self._host = host or os.getenv("OLLAMA_HOST") or infra.host
+        self._model = model or os.getenv("OLLAMA_MODEL") or infra.model
+        env_timeout = os.getenv("OLLAMA_TIMEOUT")
+        self._timeout = timeout or (int(env_timeout) if env_timeout else infra.timeout)
     
     async def analyze(self, prompt: str) -> dict | None:
         url = f"{self._host}/api/chat"
