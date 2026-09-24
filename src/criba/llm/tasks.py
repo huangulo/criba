@@ -38,6 +38,35 @@ async def _author_network_evidence(session, post) -> dict:
     return {"targets": int(targets), "weight": int(weight)}
 
 
+async def _author_topic_history(session, post, limit: int = 100) -> list[str]:
+    """Most frequent hashtags across the author's prior posts in the project.
+
+    Served by ix_posts_project_author_published. Posts published at the
+    same instant count as context too (coordination bursts share
+    timestamps); only the post under analysis is excluded.
+    """
+    from collections import Counter
+
+    from sqlalchemy import select
+
+    from criba.db.models import Post
+
+    stmt = (
+        select(Post.hashtags)
+        .where(
+            Post.project_id == post.project_id,
+            Post.author_id == post.author_id,
+            Post.published_at <= post.published_at,
+            Post.id != post.id,
+        )
+        .order_by(Post.published_at.desc())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    counts = Counter(tag for (tags,) in rows for tag in (tags or []))
+    return [tag for tag, _ in counts.most_common(10)]
+
+
 async def _analyze_flagged_posts_async() -> dict:
     from datetime import datetime
 
@@ -85,6 +114,7 @@ async def _analyze_flagged_posts_async() -> dict:
                 else None
             )
             network = await _author_network_evidence(session, post)
+            topics = await _author_topic_history(session, post)
 
             prompt = build_analysis_prompt(
                 source=post.source,
@@ -93,6 +123,7 @@ async def _analyze_flagged_posts_async() -> dict:
                     "author_handle": post.author_handle,
                     "account_age_days": account_age_days,
                     "language": post.language,
+                    "author_topics": topics,
                     "copypasta_similarity": score.copypasta_score,
                     "temporal_anomaly": score.temporal_anomaly,
                     "account_age_flag": score.account_age_flag,

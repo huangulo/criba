@@ -1,16 +1,19 @@
 """Evidence rendering in the LLM analysis prompt."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from criba.llm.prompt import MAX_CONTENT_CHARS, _format_value, build_analysis_prompt
-from criba.llm.tasks import _author_network_evidence
+from criba.llm.tasks import _author_network_evidence, _author_topic_history
 
 # The evidence shape llm/tasks.py builds for each post (Post + HeuristicScore
-# row plus the author_graph query).
+# row plus the author_graph and topic-history queries).
 EVIDENCE = {
     "author_handle": "alice.bsky.social",
     "account_age_days": 12,
     "language": "es",
+    "author_topics": ["#elecciones", "#petro"],
     "copypasta_similarity": 0.87,
     "temporal_anomaly": 0.42,
     "account_age_flag": 0.9,
@@ -32,6 +35,7 @@ def test_prompt_carries_all_evidence_lines():
     assert "- Source: bluesky" in prompt
     assert "- Author handle: alice.bsky.social" in prompt
     assert "- Author account age (days): 12" in prompt
+    assert "- Author's recent topics: #elecciones, #petro" in prompt
     assert "- Copypasta similarity score (0-1): 0.870" in prompt
     assert "- Temporal anomaly score (0-1): 0.420" in prompt
     assert "- New-account flag (0-1): 0.900" in prompt
@@ -75,6 +79,7 @@ def test_missing_evidence_renders_honestly():
         evidence={
             "author_handle": None,
             "account_age_days": None,
+            "author_topics": [],
             "hashtags": [],
             "engagement": {},
             "is_reply": False,
@@ -83,6 +88,7 @@ def test_missing_evidence_renders_honestly():
 
     assert "- Author handle: unknown" in prompt
     assert "- Author account age (days): unknown" in prompt
+    assert "- Author's recent topics: none" in prompt
     assert "- Post hashtags: none" in prompt
     assert "- Engagement metrics: none" in prompt
     assert "- Is a reply: no" in prompt
@@ -141,3 +147,44 @@ async def test_author_network_evidence_coerces_none_row_to_zeros():
     evidence = await _author_network_evidence(session, _FakePost())
 
     assert evidence == {"targets": 0, "weight": 0}
+
+
+class _FakeRowsSession:
+    def __init__(self, rows):
+        self._rows = rows
+        self.executed = []
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        return SimpleNamespace(all=lambda: self._rows)
+
+
+class _FakeTopicPost:
+    project_id = "proj-1"
+    author_id = "alice"
+    published_at = "2026-01-02T00:00:00+00:00"
+    id = "post-1"
+
+
+@pytest.mark.asyncio
+async def test_author_topic_history_ranks_hashtags_by_frequency():
+    session = _FakeRowsSession([
+        (["#a", "#b"],),
+        (["#a"],),
+        (["#c"],),
+        (None,),
+    ])
+
+    topics = await _author_topic_history(session, _FakeTopicPost())
+
+    assert topics == ["#a", "#b", "#c"]
+    assert len(session.executed) == 1
+
+
+@pytest.mark.asyncio
+async def test_author_topic_history_returns_empty_for_new_author():
+    session = _FakeRowsSession([])
+
+    topics = await _author_topic_history(session, _FakeTopicPost())
+
+    assert topics == []

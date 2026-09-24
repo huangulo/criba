@@ -30,6 +30,7 @@ _EVIDENCE_LABELS = {
     "author_handle": "Author handle",
     "account_age_days": "Author account age (days)",
     "language": "Detected language",
+    "author_topics": "Author's recent topics",
     "copypasta_similarity": "Copypasta similarity score (0-1)",
     "temporal_anomaly": "Temporal anomaly score (0-1)",
     "account_age_flag": "New-account flag (0-1)",

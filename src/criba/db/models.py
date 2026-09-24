@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ARRAY, Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -40,7 +40,10 @@ class Post(Base):
     project = relationship("Project", back_populates="posts")
     ground_truth = relationship("GroundTruth", back_populates="post", uselist=False, cascade="all, delete-orphan")
 
-    __table_args__ = (UniqueConstraint("source", "source_id", "project_id"),)
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", "project_id"),
+        Index("ix_posts_project_author_published", "project_id", "author_id", "published_at"),
+    )
 
 
 class GroundTruth(Base):
