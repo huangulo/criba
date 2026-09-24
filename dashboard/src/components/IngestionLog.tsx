@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { X, Radio } from "lucide-react";
 import {
   fetchIngestionLogs,
@@ -56,17 +56,30 @@ export default function IngestionLog({ projectId, open, onClose }: IngestionLogP
   const [loading, setLoading] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<string>("");
   const [maxScore, setMaxScore] = useState(0.6);
+  const loadRequestId = useRef(0);
 
   const load = useCallback(() => {
+    // Slider drags and filter changes fire many loads in quick succession;
+    // responses can resolve out of order, so only the most recently issued
+    // request may apply its result.
+    const request = ++loadRequestId.current;
     setLoading(true);
     fetchIngestionLogs(projectId, {
       platform: platformFilter || undefined,
       max_score: maxScore,
       limit: 200,
     })
-      .then(setPosts)
-      .catch(() => setPosts([]))
-      .finally(() => setLoading(false));
+      .then((result) => {
+        if (loadRequestId.current !== request) return;
+        setPosts(result);
+      })
+      .catch(() => {
+        if (loadRequestId.current !== request) return;
+        setPosts([]);
+      })
+      .finally(() => {
+        if (loadRequestId.current === request) setLoading(false);
+      });
   }, [projectId, platformFilter, maxScore]);
 
   useEffect(() => {

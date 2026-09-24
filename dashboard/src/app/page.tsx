@@ -40,6 +40,15 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    // A narrative or campaign selection belongs to the project it was made
+    // in; otherwise the network graph keeps querying the old narrative
+    // against the new project.
+    setSelectedNarrativeId(null);
+    setSelectedNarrativeLabel(null);
+    setSelectedCampaignId(null);
+  }, [activeProjectId]);
+
   const refreshProjects = () => {
     fetchProjects().then((data) => {
       setProjects(data);

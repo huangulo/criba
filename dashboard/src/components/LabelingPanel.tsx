@@ -47,23 +47,34 @@ export default function LabelingPanel({ projectId, open, onClose }: LabelingPane
   const [feedback, setFeedback] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const evidenceCache = useRef<Map<string, EvalEvidenceResponse>>(new Map());
+  const loadRequestId = useRef(0);
+  const latestEvidencePostId = useRef<string | null>(null);
   const [evidence, setEvidence] = useState<EvalEvidenceResponse | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [showSimilar, setShowSimilar] = useState(false);
   const [showAuthor, setShowAuthor] = useState(false);
 
+  const currentPostId = queue[0]?.post_id;
+
   const loadQueue = useCallback(async () => {
     if (!projectId) return;
+    // Only the most recently issued load may apply its result: rapid
+    // re-loads (project switch, refetch near the end of a batch) can
+    // resolve out of order, and a stale response must not overwrite
+    // the newer queue.
+    const request = ++loadRequestId.current;
     setLoading(true);
     setError(null);
     try {
       const resp = await fetchEvalQueue(projectId, 25, 0.5);
+      if (loadRequestId.current !== request) return;
       setQueue(resp.posts);
       setRemaining(resp.remaining_unlabeled);
     } catch (e) {
+      if (loadRequestId.current !== request) return;
       setError(e instanceof Error ? e.message : "Failed to load queue");
     } finally {
-      setLoading(false);
+      if (loadRequestId.current === request) setLoading(false);
     }
   }, [projectId]);
 
@@ -104,15 +115,20 @@ export default function LabelingPanel({ projectId, open, onClose }: LabelingPane
       setEvidence(evidenceCache.current.get(postId)!);
       return;
     }
+    // Guard against fast labeling: a slow fetch for a previous post must
+    // not install its evidence under the current one.
+    latestEvidencePostId.current = postId;
     setEvidenceLoading(true);
     try {
       const data = await fetchEvalEvidence(postId);
       evidenceCache.current.set(postId, data);
+      if (latestEvidencePostId.current !== postId) return;
       setEvidence(data);
     } catch {
+      if (latestEvidencePostId.current !== postId) return;
       setEvidence(null);
     } finally {
-      setEvidenceLoading(false);
+      if (latestEvidencePostId.current === postId) setEvidenceLoading(false);
     }
   }, []);
 
@@ -120,14 +136,13 @@ export default function LabelingPanel({ projectId, open, onClose }: LabelingPane
     setShowSimilar(false);
     setShowAuthor(false);
     setEvidence(null);
-  }, [queue[0]?.post_id]);
+  }, [currentPostId]);
 
   useEffect(() => {
-    const cur = queue[0];
-    if (cur && (showSimilar || showAuthor) && !evidence && !evidenceLoading) {
-      loadEvidence(cur.post_id);
+    if (currentPostId && (showSimilar || showAuthor) && !evidence && !evidenceLoading) {
+      loadEvidence(currentPostId);
     }
-  }, [queue[0]?.post_id, showSimilar, showAuthor, evidence, evidenceLoading, loadEvidence]);
+  }, [currentPostId, showSimilar, showAuthor, evidence, evidenceLoading, loadEvidence]);
 
   useEffect(() => {
     if (!open || queue.length === 0) return;

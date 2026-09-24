@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import {
   fetchCampaignInspect,
@@ -64,17 +64,28 @@ export default function CampaignInspector({ campaignId, projectId, onClose }: Ca
   const [data, setData] = useState<CampaignInspectData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const loadRequestId = useRef(0);
 
   const load = useCallback(() => {
     if (!campaignId) return;
+    // Switching campaigns quickly can resolve responses out of order; only
+    // the most recently issued request may apply its result.
+    const request = ++loadRequestId.current;
     setError(null);
     fetchCampaignInspect(campaignId, projectId)
-      .then(setData)
-      .catch((err) => setError(err.message));
+      .then((result) => {
+        if (loadRequestId.current !== request) return;
+        setData(result);
+      })
+      .catch((err) => {
+        if (loadRequestId.current !== request) return;
+        setError(err.message);
+      });
   }, [campaignId, projectId]);
 
   useEffect(() => {
     if (!campaignId) {
+      loadRequestId.current++; // invalidate any in-flight load
       setData(null);
       setError(null);
       return;
@@ -93,9 +104,16 @@ export default function CampaignInspector({ campaignId, projectId, onClose }: Ca
 
   const isOpen = campaignId !== null;
 
-  const contentVariants = data
-    ? Array.from(new Map(data.posts.map((p) => [p.content, (data.posts.filter((pp) => pp.content === p.content).length)])).entries())
-    : [];
+  const contentVariants = useMemo(() => {
+    if (!data) return [] as Array<[string, number]>;
+    // Single pass with a Map: filtering all posts per post (the previous
+    // approach) was O(n^2) string comparisons recomputed on every render.
+    const counts = new Map<string, number>();
+    for (const post of data.posts) {
+      counts.set(post.content, (counts.get(post.content) ?? 0) + 1);
+    }
+    return Array.from(counts.entries());
+  }, [data]);
 
   return (
     <>
