@@ -366,7 +366,7 @@ WS   /ws/alerts                   — WebSocket feed for real-time alerts
 | Database | PostgreSQL 16 + pgvector | Relational + vector similarity search |
 | LLM Engine | Ollama | Local inference, zero API costs, model flexibility |
 | API | FastAPI | Async Python, auto-generated OpenAPI docs |
-| Dashboard | Next.js 14 | React ecosystem, SSR for SEO if needed |
+| Dashboard | Next.js 16 | React ecosystem, SSR for SEO if needed |
 | Graphing | D3.js | Network topology visualization |
 | Containerization | Docker Compose | Single-command deployment |
 | Language Detection | lingua-py | Offline, supports 75 languages |
@@ -565,7 +565,7 @@ Criba's data is valuable for computational social science, disinformation resear
 
 #### Production Hardening
 - [ ] **Authentication & authorization** — Currently the API has no auth. Need API key or OAuth2 layer for multi-user deployments.
-- [ ] **Next.js 16 upgrade (dependency security)** — `npm audit` in `dashboard/` reports 1 critical + 4 high against `next@14.2.35` (unauthenticated RCE in the Image Optimization API, cache poisoning, SSRF in rewrites) and its bundled postcss/eslint toolchain. The dashboard uses none of the affected features (no `next/image`, middleware, rewrites, or Server Actions; the single page is client-rendered and talks to the local API) and deployments are self-hosted, so exposure today is low — but the only upstream fix is the breaking `next@16` migration (React 19, ESLint 9) and it should not be deferred indefinitely. Semver-compatible audit fixes (brace-expansion, js-yaml, nanoid, postcss-selector-parser) are already applied.
+- [x] **Next.js 16 upgrade (dependency security)** — `npm audit` in `dashboard/` now reports 0 vulnerabilities (previously 1 critical + 4 high against `next@14.2.35`; semver-compatible fixes for brace-expansion, js-yaml, nanoid, postcss-selector-parser were applied first). Upgraded to `next@16.3.6` with React 19 and ESLint 9 (flat `eslint.config.mjs`, `eslint .` lint script, node 22 in the dashboard Dockerfile). The breaking change required restructuring 5 components to satisfy `react-hooks/set-state-in-effect`: render-time prev-tracking for reset-on-change effects, `.then` chains instead of post-await setState in loaders, and stale-while-revalidate loading flags. Verified by `npm run build`, `npm run lint`, zero-audit `npm audit`, and a browser smoke test (full render, zero console errors).
 - [ ] **Rate limiting** — API rate limiting to prevent abuse on public-facing deployments.
 - [ ] **Data retention policies** — Configurable TTL for raw posts, embeddings, and analysis results. Old data should be archived or purged to manage disk usage on long-running deployments.
 - [x] **Health checks** — `/health` endpoint with dependency status (PostgreSQL, Redis, Ollama). Unauthenticated for infra probes; returns 200 while core dependencies are up (an offline Ollama degrades to `"degraded"` but still 200), 503 when a core dependency is down. Wired as the docker compose api healthcheck.

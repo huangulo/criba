@@ -40,14 +40,18 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    // A narrative or campaign selection belongs to the project it was made
-    // in; otherwise the network graph keeps querying the old narrative
-    // against the new project.
+  // A narrative or campaign selection belongs to the project it was made
+  // in; otherwise the network graph keeps querying the old narrative
+  // against the new project. Adjusted during render (the React-documented
+  // pattern for resetting state on prop change) rather than in an effect,
+  // which would cascade an extra render.
+  const [selectionProjectId, setSelectionProjectId] = useState(activeProjectId);
+  if (activeProjectId !== selectionProjectId) {
+    setSelectionProjectId(activeProjectId);
     setSelectedNarrativeId(null);
     setSelectedNarrativeLabel(null);
     setSelectedCampaignId(null);
-  }, [activeProjectId]);
+  }
 
   const refreshProjects = () => {
     fetchProjects().then((data) => {

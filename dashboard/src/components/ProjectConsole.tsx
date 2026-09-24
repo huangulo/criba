@@ -52,12 +52,16 @@ export default function ProjectConsole({ open, onClose, onProjectsChange }: Proj
     temporal_cluster_min: 5,
     new_account_days: 7,
   });
-  const [baselineLoading, setBaselineLoading] = useState(false);
+  // True until the first response lands: skeleton on first open, stale
+  // content while refetching.
+  const [baselineLoading, setBaselineLoading] = useState(true);
   const [baselineSaving, setBaselineSaving] = useState(false);
   const [baselineSaved, setBaselineSaved] = useState(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  // True until the first response lands: skeleton on first open, stale
+  // content while refetching.
+  const [projectsLoading, setProjectsLoading] = useState(true);
 
   const [projectName, setProjectName] = useState("");
   const [projectDesc, setProjectDesc] = useState("");
@@ -68,7 +72,7 @@ export default function ProjectConsole({ open, onClose, onProjectsChange }: Proj
   const [creating, setCreating] = useState(false);
 
   const loadBaseline = useCallback(() => {
-    setBaselineLoading(true);
+    // No synchronous state updates: effects may call this directly.
     fetchBaselineSettings()
       .then(setBaseline)
       .catch(() => {})
@@ -76,7 +80,6 @@ export default function ProjectConsole({ open, onClose, onProjectsChange }: Proj
   }, []);
 
   const loadProjects = useCallback(() => {
-    setProjectsLoading(true);
     fetchProjects()
       .then(setProjects)
       .catch(() => {})

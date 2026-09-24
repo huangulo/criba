@@ -53,7 +53,10 @@ const PLATFORM_OPTIONS = [
 
 export default function IngestionLog({ projectId, open, onClose }: IngestionLogProps) {
   const [posts, setPosts] = useState<IngestionLogPost[]>([]);
-  const [loading, setLoading] = useState(false);
+  // True until the first response lands: the skeleton shows on first open,
+  // and later reloads keep the previous posts visible instead of flashing
+  // a spinner (stale-while-revalidate).
+  const [loading, setLoading] = useState(true);
   const [platformFilter, setPlatformFilter] = useState<string>("");
   const [maxScore, setMaxScore] = useState(0.6);
   const loadRequestId = useRef(0);
@@ -61,9 +64,9 @@ export default function IngestionLog({ projectId, open, onClose }: IngestionLogP
   const load = useCallback(() => {
     // Slider drags and filter changes fire many loads in quick succession;
     // responses can resolve out of order, so only the most recently issued
-    // request may apply its result.
+    // request may apply its result. No synchronous state updates here so
+    // the effect can call this directly without cascading renders.
     const request = ++loadRequestId.current;
-    setLoading(true);
     fetchIngestionLogs(projectId, {
       platform: platformFilter || undefined,
       max_score: maxScore,

@@ -60,31 +60,51 @@ export default function NetworkGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<NetworkGraphData | null>(null);
-  const [loading, setLoading] = useState(false);
+  // True until the first response lands: skeleton on mount, then the
+  // previous graph stays visible while a new narrative loads.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestId = useRef(0);
 
-  const load = useCallback(() => {
+  // Deselecting a narrative clears the graph during render (the
+  // React-documented pattern for resetting state on prop change) instead
+  // of synchronously inside an effect.
+  const [renderedNarrativeId, setRenderedNarrativeId] = useState(narrativeId);
+  if (narrativeId !== renderedNarrativeId) {
+    setRenderedNarrativeId(narrativeId);
     if (!narrativeId) {
       setData(null);
       setError(null);
-      return;
     }
-    setLoading(true);
-    setError(null);
+  }
+
+  const load = useCallback(() => {
+    if (!narrativeId) return;
+    // Only the most recently issued request may apply its result: switching
+    // narratives quickly can resolve responses out of order. No synchronous
+    // state updates, so the effect can call this without cascading renders.
+    const request = ++loadRequestId.current;
     fetchNetworkGraph(narrativeId, projectId)
       .then((result) => {
+        if (loadRequestId.current !== request) return;
         setData(result);
+        setError(null);
         setLoading(false);
       })
       .catch((err) => {
+        if (loadRequestId.current !== request) return;
         setError(err.message);
         setLoading(false);
       });
   }, [narrativeId, projectId]);
 
   useEffect(() => {
+    if (!narrativeId) {
+      loadRequestId.current++; // invalidate any in-flight load
+      return;
+    }
     load();
-  }, [load]);
+  }, [narrativeId, load]);
 
   useEffect(() => {
     if (!data || !svgRef.current || !containerRef.current) return;

@@ -66,15 +66,28 @@ export default function CampaignInspector({ campaignId, projectId, onClose }: Ca
   const panelRef = useRef<HTMLDivElement>(null);
   const loadRequestId = useRef(0);
 
+  // Deselecting a campaign clears the inspector during render (the
+  // React-documented reset-on-change pattern) instead of in an effect.
+  const [renderedCampaignId, setRenderedCampaignId] = useState(campaignId);
+  if (campaignId !== renderedCampaignId) {
+    setRenderedCampaignId(campaignId);
+    if (!campaignId) {
+      setData(null);
+      setError(null);
+    }
+  }
+
   const load = useCallback(() => {
     if (!campaignId) return;
     // Switching campaigns quickly can resolve responses out of order; only
     // the most recently issued request may apply its result.
     const request = ++loadRequestId.current;
-    setError(null);
+    // No synchronous state updates, so the effect can call this without
+    // cascading renders; a stale error clears when the response lands.
     fetchCampaignInspect(campaignId, projectId)
       .then((result) => {
         if (loadRequestId.current !== request) return;
+        setError(null);
         setData(result);
       })
       .catch((err) => {
@@ -86,8 +99,6 @@ export default function CampaignInspector({ campaignId, projectId, onClose }: Ca
   useEffect(() => {
     if (!campaignId) {
       loadRequestId.current++; // invalidate any in-flight load
-      setData(null);
-      setError(null);
       return;
     }
     load();

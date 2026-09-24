@@ -41,7 +41,9 @@ interface LabelingPanelProps {
 export default function LabelingPanel({ projectId, open, onClose }: LabelingPanelProps) {
   const [queue, setQueue] = useState<EvalQueueItem[]>([]);
   const [remaining, setRemaining] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
+  // True until the first queue lands: skeleton on first open, the previous
+  // queue stays visible while refetching.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [labeledSession, setLabeledSession] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -56,26 +58,39 @@ export default function LabelingPanel({ projectId, open, onClose }: LabelingPane
 
   const currentPostId = queue[0]?.post_id;
 
-  const loadQueue = useCallback(async () => {
+  // Switching posts folds away the evidence sections during render (the
+  // React-documented reset-on-change pattern) rather than in an effect.
+  const [renderedPostId, setRenderedPostId] = useState<string | undefined>(currentPostId);
+  if (currentPostId !== renderedPostId) {
+    setRenderedPostId(currentPostId);
+    setShowSimilar(false);
+    setShowAuthor(false);
+    setEvidence(null);
+  }
+
+  const loadQueue = useCallback(() => {
     if (!projectId) return;
     // Only the most recently issued load may apply its result: rapid
     // re-loads (project switch, refetch near the end of a batch) can
     // resolve out of order, and a stale response must not overwrite
-    // the newer queue.
+    // the newer queue. All state updates happen in async continuations,
+    // so effects can call this without cascading renders; the previous
+    // queue stays visible until the response lands (stale-while-revalidate).
     const request = ++loadRequestId.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await fetchEvalQueue(projectId, 25, 0.5);
-      if (loadRequestId.current !== request) return;
-      setQueue(resp.posts);
-      setRemaining(resp.remaining_unlabeled);
-    } catch (e) {
-      if (loadRequestId.current !== request) return;
-      setError(e instanceof Error ? e.message : "Failed to load queue");
-    } finally {
-      if (loadRequestId.current === request) setLoading(false);
-    }
+    fetchEvalQueue(projectId, 25, 0.5)
+      .then((resp) => {
+        if (loadRequestId.current !== request) return;
+        setError(null);
+        setQueue(resp.posts);
+        setRemaining(resp.remaining_unlabeled);
+      })
+      .catch((e) => {
+        if (loadRequestId.current !== request) return;
+        setError(e instanceof Error ? e.message : "Failed to load queue");
+      })
+      .finally(() => {
+        if (loadRequestId.current === request) setLoading(false);
+      });
   }, [projectId]);
 
   useEffect(() => {
@@ -131,12 +146,6 @@ export default function LabelingPanel({ projectId, open, onClose }: LabelingPane
       if (latestEvidencePostId.current === postId) setEvidenceLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    setShowSimilar(false);
-    setShowAuthor(false);
-    setEvidence(null);
-  }, [currentPostId]);
 
   useEffect(() => {
     if (currentPostId && (showSimilar || showAuthor) && !evidence && !evidenceLoading) {
