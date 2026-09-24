@@ -35,7 +35,7 @@ class ConnectionManager:
             for ws in self._connections:
                 try:
                     await ws.send_text(payload)
-                except Exception:
+                except Exception:  # noqa: BLE001 - any send failure means the socket is dead
                     disconnected.append(ws)
         for ws in disconnected:
             await self.disconnect(ws)

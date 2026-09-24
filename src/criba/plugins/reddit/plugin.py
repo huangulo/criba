@@ -1,13 +1,13 @@
 import logging
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
-from criba.models.raw_post import RawPost
-from criba.models.rate_limit import RateLimitConfig
 from criba.models.plugin_base import SourcePlugin
+from criba.models.rate_limit import RateLimitConfig
+from criba.models.raw_post import RawPost
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class RedditPlugin(SourcePlugin):
         source_id = sub.get("name") or sub.get("id", "")
 
         created_utc = sub.get("created_utc", 0)
-        published_at = datetime.fromtimestamp(created_utc, tz=timezone.utc) if created_utc else datetime.now(timezone.utc)
+        published_at = datetime.fromtimestamp(created_utc, tz=UTC) if created_utc else datetime.now(UTC)
 
         hashtags = HASHTAG_RE.findall(content)
         mentions = MENTION_RE.findall(content)

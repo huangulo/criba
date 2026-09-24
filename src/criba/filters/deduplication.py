@@ -1,7 +1,7 @@
 import hashlib
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from criba.filters.base import BaseFilter, FilterResult
 from criba.models.raw_post import RawPost
@@ -28,7 +28,7 @@ class DeduplicationFilter(BaseFilter):
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     
     async def apply(self, post: RawPost, context: dict) -> FilterResult:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         content_hash = self._hash(post.content)
         
         self._maybe_prune(now)

@@ -1,6 +1,6 @@
-import pytest
+from datetime import UTC, datetime
+
 import pytest_asyncio
-from datetime import datetime, timezone
 
 from criba.models.raw_post import RawPost
 
@@ -17,7 +17,7 @@ def make_post():
             "author_created_at": None,
             "content": "This is a test post with some content for testing purposes",
             "language": None,
-            "published_at": datetime(2025, 1, 15, 14, 0, 0, tzinfo=timezone.utc),
+            "published_at": datetime(2025, 1, 15, 14, 0, 0, tzinfo=UTC),
             "url": None,
             "engagement": {},
             "hashtags": [],

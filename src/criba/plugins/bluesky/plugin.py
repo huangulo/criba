@@ -75,14 +75,14 @@ class BlueskyPlugin(SourcePlugin):
         published_at = datetime.now(UTC)
         if hasattr(record, "created_at") and record.created_at:
             try:
-                published_at = datetime.fromisoformat(record.created_at.replace("Z", "+00:00"))
+                published_at = datetime.fromisoformat(record.created_at)
             except (ValueError, TypeError):
                 pass
 
         author_created_at = None
         if hasattr(author, "created_at") and author.created_at:
             try:
-                author_created_at = datetime.fromisoformat(author.created_at.replace("Z", "+00:00"))
+                author_created_at = datetime.fromisoformat(author.created_at)
             except (ValueError, TypeError):
                 pass
 

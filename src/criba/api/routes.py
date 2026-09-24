@@ -2,21 +2,21 @@ import logging
 import re
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, and_, delete
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from criba.api.schemas import (
+    AuthorRecentPost,
+    AuthorStats,
     BaselineSettings,
     BaselineSettingsUpdate,
     CampaignInspectResponse,
     CampaignResponse,
     CopypastaPhrase,
-    AuthorRecentPost,
-    AuthorStats,
     EvalEvidenceResponse,
     EvalLabelInput,
     EvalLabelResponse,
@@ -31,7 +31,6 @@ from criba.api.schemas import (
     PlatformBleedStep,
     ProjectCreate,
     ProjectResponse,
-    ProjectTargetInput,
     ProjectTargetResponse,
     RawPostLog,
     SimilarPost,
@@ -48,7 +47,6 @@ from criba.db.models import (
     Narrative,
     NarrativePost,
     Post,
-    PostEmbedding,
     Project,
     ProjectTarget,
     SystemSetting,
@@ -274,11 +272,9 @@ async def get_network(
         if source:
             source_counts[author_id][source] = source_counts[author_id].get(source, 0) + 1
 
-    for author_id in author_info:
-        if source_counts[author_id]:
-            author_info[author_id]["platform"] = max(
-                source_counts[author_id], key=source_counts[author_id].get
-            )
+    for author_id, counts in source_counts.items():
+        if counts:
+            author_info[author_id]["platform"] = max(counts, key=counts.get)
 
     author_ids = set(author_info.keys())
 
@@ -502,10 +498,9 @@ async def inspect_campaign(
     else:
         time_span = None
 
-    unique_author_ids = set(p.author_id for p in posts)
-    unique_platform_set = set(p.source for p in posts)
+    unique_author_ids = {p.author_id for p in posts}
+    unique_platform_set = {p.source for p in posts}
     plural_posts = "post" if total == 1 else "posts"
-    identity_pct = round(identity_ratio * 100)
 
     if identity_ratio >= 0.8:
         dup_word = "identical"
@@ -997,7 +992,7 @@ async def get_eval_evidence(
     total_author_posts, first_seen, last_seen, sources = agg
     account_age_days = None
     if post.author_created:
-        account_age_days = (datetime.now(timezone.utc) - post.author_created).total_seconds() / 86400.0
+        account_age_days = (datetime.now(UTC) - post.author_created).total_seconds() / 86400.0
 
     author_stats = AuthorStats(
         author_handle=post.author_handle,

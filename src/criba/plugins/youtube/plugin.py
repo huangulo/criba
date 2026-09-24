@@ -1,14 +1,16 @@
 import json
+import logging
 import os
 import re
-import logging
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from criba.models.raw_post import RawPost
-from criba.models.rate_limit import RateLimitConfig
+
 from criba.models.plugin_base import SourcePlugin
+from criba.models.rate_limit import RateLimitConfig
+from criba.models.raw_post import RawPost
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +86,7 @@ class YouTubePlugin(SourcePlugin):
         like_count = snippet.get("likeCount", 0)
         can_reply = snippet.get("canReply", False)
 
-        published_at = datetime.fromisoformat(published_at_str.replace("Z", "+00:00")) if published_at_str else datetime.now(timezone.utc)
+        published_at = datetime.fromisoformat(published_at_str) if published_at_str else datetime.now(UTC)
 
         hashtags = HASHTAG_RE.findall(text_display)
         mentions = MENTION_RE.findall(text_display)

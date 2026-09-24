@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import UTC
 
 from criba.celery_app import app
 
@@ -38,9 +39,10 @@ async def _author_network_evidence(session, post) -> dict:
 
 
 async def _analyze_flagged_posts_async() -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from sqlalchemy import select
+
     from criba.db.connection import get_async_session_factory
     from criba.db.models import HeuristicScore, LlmAnalysis, Post
     from criba.llm.client import OllamaClient
@@ -78,7 +80,7 @@ async def _analyze_flagged_posts_async() -> dict:
 
         for post, score in rows:
             account_age_days = (
-                (datetime.now(timezone.utc) - post.author_created).days
+                (datetime.now(UTC) - post.author_created).days
                 if post.author_created
                 else None
             )

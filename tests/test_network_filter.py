@@ -1,5 +1,4 @@
 import pytest
-import pytest_asyncio
 
 from criba.filters.network import NetworkGraphFilter
 

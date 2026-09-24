@@ -1,11 +1,11 @@
 import logging
 import uuid
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from criba.db.models import Post, LlmAnalysis, PostEmbedding, Narrative, NarrativePost, Campaign
+from criba.db.models import Campaign, LlmAnalysis, Narrative, NarrativePost, Post, PostEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,6 @@ class NarrativeEngine:
         return {"clustered": clustered, "new_narratives": new_narratives, "updated_narratives": updated_narratives}
 
     async def _find_matching_narrative(self, embedding: list[float], project_id: uuid.UUID) -> Narrative | None:
-        from pgvector.sqlalchemy import Vector
 
         max_distance = 1.0 - self._threshold
 

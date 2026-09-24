@@ -5,16 +5,17 @@ Revises: 2669cdb38ea0
 Create Date: 2026-09-23 12:00:00.000000
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
+
+import sqlalchemy as sa
 
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "c9d4e8a1f7b2"
-down_revision: Union[str, None] = "2669cdb38ea0"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "2669cdb38ea0"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 # (table, column, referenced_table) for foreign keys that must cascade so

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from criba.filters.base import BaseFilter, FilterResult
 from criba.models.raw_post import RawPost
@@ -31,7 +31,7 @@ class AccountAgeFilter(BaseFilter):
                 metadata={"account_age_days": None},
             )
         
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         age_days = (now - post.author_created_at).days
         
         if age_days <= self._new_account_days:

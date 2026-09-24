@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import ARRAY, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -34,7 +34,7 @@ class Post(Base):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     ingested_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     project = relationship("Project", back_populates="posts")
@@ -53,7 +53,7 @@ class GroundTruth(Base):
     labeled_by: Mapped[str] = mapped_column(String(100), nullable=False, default="manual")
     notes: Mapped[str | None] = mapped_column(Text)
     labeled_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
     post = relationship("Post", back_populates="ground_truth")
@@ -71,7 +71,7 @@ class HeuristicScore(Base):
     composite_score: Mapped[float] = mapped_column(Float, default=0.0)
     sent_to_llm: Mapped[bool] = mapped_column(Boolean, default=False)
     scored_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -88,7 +88,7 @@ class LlmAnalysis(Base):
     recommended_action: Mapped[str | None] = mapped_column(String(50))
     model_used: Mapped[str | None] = mapped_column(String(100))
     analyzed_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -133,7 +133,7 @@ class AuthorGraph(Base):
     interaction: Mapped[str] = mapped_column(String(50), primary_key=True)
     weight: Mapped[int] = mapped_column(Integer, default=1)
     last_seen: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -144,7 +144,7 @@ class Campaign(Base):
     label: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     detected_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
     confidence: Mapped[float | None] = mapped_column(Float)
     account_count: Mapped[int | None] = mapped_column(Integer)
@@ -167,7 +167,7 @@ class PostEmbedding(Base):
     embedding = mapped_column(Vector(768), nullable=False)
     model_used: Mapped[str] = mapped_column(String(100), nullable=False, default="nomic-embed-text")
     embedded_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -178,7 +178,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     posts = relationship("Post", back_populates="project", cascade="all, delete-orphan")

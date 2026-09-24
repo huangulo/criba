@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass, field
 
 from criba.models.raw_post import RawPost
+
 from .base import BaseFilter, FilterResult
 
 logger = logging.getLogger(__name__)

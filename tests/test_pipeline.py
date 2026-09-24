@@ -1,13 +1,11 @@
-import pytest
-import pytest_asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-from criba.filters.language import LanguageFilter
-from criba.filters.deduplication import DeduplicationFilter
-from criba.filters.copypasta import CopypastaFilter
-from criba.filters.temporal import TemporalAnomalyFilter
+import pytest
+
 from criba.filters.account_age import AccountAgeFilter
+from criba.filters.deduplication import DeduplicationFilter
 from criba.filters.hashtag import HashtagCooccurrenceFilter
+from criba.filters.language import LanguageFilter
 from criba.filters.network import NetworkGraphFilter
 from criba.filters.pipeline import FilterPipeline
 
@@ -77,7 +75,7 @@ async def test_composite_score_calculation(make_post):
 async def test_pipeline_with_account_age_filter(make_post):
     filters = [AccountAgeFilter()]
     pipeline = FilterPipeline(filters, threshold=0.5)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     post = make_post(author_created_at=now - timedelta(days=5))
     result = await pipeline.run(post)
     assert result.composite_score == 0.8

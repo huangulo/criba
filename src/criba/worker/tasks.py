@@ -3,7 +3,7 @@ import logging
 import sys
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from criba.celery_app import app
 
@@ -55,13 +55,14 @@ def ingest_source(self, source_name: str) -> dict:
 
 
 async def _ingest_source_async(source_name: str) -> dict:
+    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from criba.db.connection import get_async_session_factory
     from criba.db.models import AuthorGraph, HeuristicScore, Post, ProjectTarget
     from criba.filters.scoring import create_pipeline, get_scoring_settings
     from criba.filters.state import save_filter_state
     from criba.plugins.registry import get_plugin
-    from sqlalchemy import select
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     plugin = get_plugin(source_name)
 
@@ -201,7 +202,7 @@ async def _ingest_source_async(source_name: str) -> dict:
                             index_elements=[
                                 "project_id", "source", "source_author", "target_author", "interaction",
                             ],
-                            set_={"weight": AuthorGraph.weight + 1, "last_seen": datetime.now(timezone.utc)}
+                            set_={"weight": AuthorGraph.weight + 1, "last_seen": datetime.now(UTC)}
                         )
                         await session.execute(edge_stmt)
 

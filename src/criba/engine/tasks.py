@@ -17,8 +17,9 @@ def generate_post_embeddings(self) -> dict:
 
 async def _generate_embeddings_async() -> dict:
     from sqlalchemy import select
+
     from criba.db.connection import get_async_session_factory
-    from criba.db.models import LlmAnalysis, PostEmbedding, Post
+    from criba.db.models import LlmAnalysis, Post, PostEmbedding
     from criba.llm.embedding import OllamaEmbeddingClient
 
     client = OllamaEmbeddingClient()
@@ -89,6 +90,7 @@ def cluster_narratives(self) -> dict:
 
 async def _cluster_narratives_async() -> dict:
     from sqlalchemy import select
+
     from criba.db.connection import get_async_session_factory
     from criba.db.models import Post
     from criba.engine.narrative import NarrativeEngine
@@ -126,16 +128,17 @@ def detect_campaigns(self) -> dict:
 
 async def _detect_campaigns_async() -> dict:
     from sqlalchemy import select
+
     from criba.db.connection import get_async_session_factory
-    from criba.engine.narrative import NarrativeEngine
     from criba.db.models import Campaign, Post, SystemSetting
+    from criba.engine.narrative import NarrativeEngine
 
     session_factory = get_async_session_factory()
 
     async with session_factory() as session:
-        existing_ids = set(
+        existing_ids = {
             row[0] for row in (await session.execute(select(Campaign.id))).all()
-        )
+        }
 
     async with session_factory() as session:
         project_ids = [
@@ -155,9 +158,9 @@ async def _detect_campaigns_async() -> dict:
 
     if total_result.get("detected", 0) > 0:
         async with session_factory() as session:
-            all_ids = set(
+            all_ids = {
                 row[0] for row in (await session.execute(select(Campaign.id))).all()
-            )
+            }
             new_ids = all_ids - existing_ids
 
             if new_ids:

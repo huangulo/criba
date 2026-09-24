@@ -1,6 +1,5 @@
 import importlib
 import logging
-import pkgutil
 from pathlib import Path
 
 from criba.models.plugin_base import SourcePlugin

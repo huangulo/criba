@@ -1,5 +1,4 @@
 import pytest
-import pytest_asyncio
 
 from criba.filters.copypasta import CopypastaFilter
 

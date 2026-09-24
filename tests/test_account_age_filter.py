@@ -1,6 +1,6 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
-import pytest_asyncio
-from datetime import datetime, timezone, timedelta
 
 from criba.filters.account_age import AccountAgeFilter
 
@@ -8,7 +8,7 @@ from criba.filters.account_age import AccountAgeFilter
 @pytest.mark.asyncio
 async def test_new_account(make_post):
     filter = AccountAgeFilter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     post = make_post(author_created_at=now - timedelta(days=3))
     context = {}
     result = await filter.apply(post, context)
@@ -21,7 +21,7 @@ async def test_new_account(make_post):
 @pytest.mark.asyncio
 async def test_suspicious_account(make_post):
     filter = AccountAgeFilter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     post = make_post(author_created_at=now - timedelta(days=15))
     context = {}
     result = await filter.apply(post, context)
@@ -34,7 +34,7 @@ async def test_suspicious_account(make_post):
 @pytest.mark.asyncio
 async def test_mature_account(make_post):
     filter = AccountAgeFilter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     post = make_post(author_created_at=now - timedelta(days=100))
     context = {}
     result = await filter.apply(post, context)
@@ -58,7 +58,7 @@ async def test_no_creation_date(make_post):
 @pytest.mark.asyncio
 async def test_moderate_account(make_post):
     filter = AccountAgeFilter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     post = make_post(author_created_at=now - timedelta(days=60))
     context = {}
     result = await filter.apply(post, context)
@@ -70,7 +70,7 @@ async def test_moderate_account(make_post):
 @pytest.mark.asyncio
 async def test_exactly_new_account_threshold(make_post):
     filter = AccountAgeFilter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     post = make_post(author_created_at=now - timedelta(days=7))
     context = {}
     result = await filter.apply(post, context)

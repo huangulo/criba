@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from criba.filters.base import BaseFilter, FilterResult
 from criba.models.raw_post import RawPost
@@ -25,7 +25,7 @@ class NetworkGraphFilter(BaseFilter):
         return 1.0
 
     async def apply(self, post: RawPost, context: dict) -> FilterResult:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         edges_to_add: list[tuple[str, str, str]] = []
 
         for mention in post.mentions:

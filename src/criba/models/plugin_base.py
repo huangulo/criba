@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
-from .raw_post import RawPost
 from .rate_limit import RateLimitConfig
+from .raw_post import RawPost
 
 
 class SourcePlugin(ABC):

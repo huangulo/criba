@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from criba.filters.base import BaseFilter, FilterResult
 from criba.models.raw_post import RawPost
@@ -31,7 +31,7 @@ class TemporalAnomalyFilter(BaseFilter):
 
     async def apply(self, post: RawPost, context: dict) -> FilterResult:
         source = post.source
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         post_hour = post.published_at.hour
 

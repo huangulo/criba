@@ -113,6 +113,7 @@ async def _send_telegram(bot_token: str, chat_id: str, msg: dict) -> bool:
 async def _get_notification_settings() -> dict[str, str]:
     """Fetch notification settings from system_settings table."""
     from sqlalchemy import select
+
     from criba.db.connection import get_async_session_factory
     from criba.db.models import SystemSetting
 

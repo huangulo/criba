@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import csv
 import getpass
+import io
 import os
 import sys
 import uuid
@@ -66,10 +67,16 @@ async def _export(args: argparse.Namespace) -> None:
     n_high_actual = min(n_high, total_available)
     n_low_actual = total_available - n_high_actual
 
-    with open(args.out, "w", newline="", encoding="utf-8") as f:
+    await asyncio.to_thread(_write_export_csv, args.out, deduped)
+
+    print(f"Exported {total_available} posts ({n_high_actual} high-score, {n_low_actual} low-score) → {args.out}")
+
+
+def _write_export_csv(out_path: str, rows: list) -> None:
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
         writer.writerow(CSV_COLUMNS)
-        for row in deduped:
+        for row in rows:
             post_id, source, published_at, composite_score, content = row
             truncated = content[:CONTENT_TRUNCATE] if content and len(content) > CONTENT_TRUNCATE else content
             writer.writerow([
@@ -81,7 +88,10 @@ async def _export(args: argparse.Namespace) -> None:
                 "",
             ])
 
-    print(f"Exported {total_available} posts ({n_high_actual} high-score, {n_low_actual} low-score) → {args.out}")
+
+def _read_csv_text(in_path: str) -> str:
+    with open(in_path, newline="", encoding="utf-8") as f:
+        return f.read()
 
 
 async def _import(args: argparse.Namespace) -> None:
@@ -91,48 +101,49 @@ async def _import(args: argparse.Namespace) -> None:
     errors: list[tuple[str, str]] = []
 
     session_factory = get_async_session_factory()
+    text = await asyncio.to_thread(_read_csv_text, args.in_file)
+
     async with session_factory() as session:
-        with open(args.in_file, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                rows_read += 1
-                raw_label = row.get("label", "").strip()
-                post_id_str = row.get("post_id", "").strip()
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            rows_read += 1
+            raw_label = row.get("label", "").strip()
+            post_id_str = row.get("post_id", "").strip()
 
-                if not raw_label:
-                    skipped_empty += 1
-                    continue
+            if not raw_label:
+                skipped_empty += 1
+                continue
 
-                label = raw_label.lower()
-                if label not in VALID_LABELS:
-                    errors.append((post_id_str, f"invalid label: {raw_label}"))
-                    continue
+            label = raw_label.lower()
+            if label not in VALID_LABELS:
+                errors.append((post_id_str, f"invalid label: {raw_label}"))
+                continue
 
-                try:
-                    post_id = uuid.UUID(post_id_str)
-                except ValueError:
-                    errors.append((post_id_str, "invalid UUID"))
-                    continue
+            try:
+                post_id = uuid.UUID(post_id_str)
+            except ValueError:
+                errors.append((post_id_str, "invalid UUID"))
+                continue
 
-                exists = (
-                    await session.execute(select(Post.id).where(Post.id == post_id))
-                ).scalar_one_or_none()
-                if exists is None:
-                    errors.append((post_id_str, "post not found"))
-                    continue
+            exists = (
+                await session.execute(select(Post.id).where(Post.id == post_id))
+            ).scalar_one_or_none()
+            if exists is None:
+                errors.append((post_id_str, "post not found"))
+                continue
 
-                stmt = pg_insert(GroundTruth).values(
-                    post_id=post_id,
-                    label=label,
-                    labeled_by="manual",
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["post_id"],
-                    set_={"label": stmt.excluded.label, "labeled_at": func.now()},
-                )
-                await session.execute(stmt)
-                await session.commit()
-                upserted += 1
+            stmt = pg_insert(GroundTruth).values(
+                post_id=post_id,
+                label=label,
+                labeled_by="manual",
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["post_id"],
+                set_={"label": stmt.excluded.label, "labeled_at": func.now()},
+            )
+            await session.execute(stmt)
+            await session.commit()
+            upserted += 1
 
     print(f"Import complete: {rows_read} rows read, {upserted} upserted, {skipped_empty} skipped (blank)")
     if errors:

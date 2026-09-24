@@ -3,15 +3,15 @@ import logging
 import os
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError
-from telethon.tl.types import Message, Channel
+from telethon.tl.types import Message
 
-from criba.models.raw_post import RawPost
-from criba.models.rate_limit import RateLimitConfig
 from criba.models.plugin_base import SourcePlugin
+from criba.models.rate_limit import RateLimitConfig
+from criba.models.raw_post import RawPost
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +61,8 @@ class TelegramPlugin(SourcePlugin):
         if self._client is not None and self._client_loop is not current_loop:
             try:
                 await self._client.disconnect()
-            except Exception:
-                pass
+            except Exception:  # best-effort cleanup of a client on a dead loop
+                logger.debug("Telethon disconnect during loop switch failed", exc_info=True)
             self._client = None
 
         if self._client is None or not self._client.is_connected():
@@ -151,7 +151,7 @@ class TelegramPlugin(SourcePlugin):
             author_created_at=author_created_at,
             content=text,
             language=None,  # will be detected by heuristics
-            published_at=message.date or datetime.now(timezone.utc),
+            published_at=message.date or datetime.now(UTC),
             url=url,
             engagement=engagement,
             hashtags=hashtags,

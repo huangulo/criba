@@ -1,11 +1,11 @@
-from criba.filters.pipeline import FilterPipeline
-from criba.filters.language import LanguageFilter
-from criba.filters.deduplication import DeduplicationFilter
-from criba.filters.copypasta import CopypastaFilter
-from criba.filters.temporal import TemporalAnomalyFilter
 from criba.filters.account_age import AccountAgeFilter
+from criba.filters.copypasta import CopypastaFilter
+from criba.filters.deduplication import DeduplicationFilter
 from criba.filters.hashtag import HashtagCooccurrenceFilter
+from criba.filters.language import LanguageFilter
 from criba.filters.network import NetworkGraphFilter
+from criba.filters.pipeline import FilterPipeline
+from criba.filters.temporal import TemporalAnomalyFilter
 
 DEFAULT_SCORING_SETTINGS = {
     "heuristic_threshold": 0.6,
@@ -45,6 +45,7 @@ def create_pipeline(
 async def get_scoring_settings() -> dict[str, float | int]:
     """Fetch all heuristic scoring settings from system_settings."""
     from sqlalchemy import select
+
     from criba.db.connection import get_async_session_factory
     from criba.db.models import SystemSetting
 

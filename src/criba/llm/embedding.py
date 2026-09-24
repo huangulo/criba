@@ -54,7 +54,7 @@ class OllamaEmbeddingClient:
             async with httpx.AsyncClient(timeout=5) as client:
                 response = await client.get(f"{self._host}/api/tags")
                 return response.status_code == 200
-        except Exception:
+        except Exception:  # noqa: BLE001 - any failure means the service is unavailable
             return False
 
     @property

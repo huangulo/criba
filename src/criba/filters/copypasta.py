@@ -1,6 +1,5 @@
 import logging
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from datasketch import MinHash, MinHashLSH
 
@@ -32,7 +31,7 @@ def _create_minhash(shingles: set[str]) -> MinHash:
 
 
 class _CorpusEntry:
-    __slots__ = ("post_id", "author_id", "minhash", "timestamp")
+    __slots__ = ("author_id", "minhash", "post_id", "timestamp")
 
     def __init__(self, post_id: str, author_id: str, minhash: MinHash, timestamp: datetime):
         self.post_id = post_id
@@ -46,7 +45,7 @@ class CopypastaFilter(BaseFilter):
     def __init__(self, similar_threshold: int | None = None):
         self._lsh = MinHashLSH(threshold=JACCARD_THRESHOLD, num_perm=NUM_PERM)
         self._entries: dict[str, _CorpusEntry] = {}
-        self._last_prune: datetime = datetime.now(timezone.utc)
+        self._last_prune: datetime = datetime.now(UTC)
         self._similar_threshold = (
             similar_threshold if similar_threshold is not None else DEFAULT_SIMILAR_THRESHOLD
         )
@@ -98,7 +97,7 @@ class CopypastaFilter(BaseFilter):
             post_id=post.source_id,
             author_id=post.author_id,
             minhash=mh,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
         self._lsh.insert(key, mh)
 
@@ -114,7 +113,7 @@ class CopypastaFilter(BaseFilter):
         )
 
     def _maybe_prune(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if now - self._last_prune < timedelta(hours=1):
             return
 

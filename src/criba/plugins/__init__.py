@@ -1,1 +1,3 @@
-from .registry import get_plugin, register_plugin, list_plugins
+from .registry import get_plugin, list_plugins, register_plugin
+
+__all__ = ["get_plugin", "list_plugins", "register_plugin"]

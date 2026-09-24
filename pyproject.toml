@@ -36,6 +36,11 @@ criba-worker = "criba.worker.tasks:main"
 line-length = 120
 target-version = "py312"
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection and query-parameter idioms are evaluated
+# once per route definition by design; B008 must not flag them.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

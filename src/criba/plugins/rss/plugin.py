@@ -2,15 +2,15 @@ import hashlib
 import logging
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import feedparser
 import httpx
 
-from criba.models.raw_post import RawPost
-from criba.models.rate_limit import RateLimitConfig
 from criba.models.plugin_base import SourcePlugin
+from criba.models.rate_limit import RateLimitConfig
+from criba.models.raw_post import RawPost
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def _parse_date(entry) -> datetime | None:
         value = getattr(entry, field, None)
         if value:
             try:
-                return datetime(*value[:6], tzinfo=timezone.utc)
+                return datetime(*value[:6], tzinfo=UTC)
             except (ValueError, TypeError):
                 continue
     for field in ("published", "updated", "created"):
@@ -68,7 +68,7 @@ def _parse_date(entry) -> datetime | None:
                 continue
             if parsed is not None:
                 if parsed.tzinfo is None:
-                    parsed = parsed.replace(tzinfo=timezone.utc)
+                    parsed = parsed.replace(tzinfo=UTC)
                 return parsed
     return None
 
@@ -132,7 +132,7 @@ class RSSPlugin(SourcePlugin):
         author = getattr(entry, "author", "") or feed_name
 
         # Parse date
-        published_at = _parse_date(entry) or datetime.now(timezone.utc)
+        published_at = _parse_date(entry) or datetime.now(UTC)
 
         # Extract link
         url = getattr(entry, "link", None)

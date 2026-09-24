@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from criba.filters.base import BaseFilter, FilterResult
 from criba.models.raw_post import RawPost
@@ -14,7 +14,7 @@ CORPUS_HOURS = 72
 
 
 class _CooccurrenceRecord:
-    __slots__ = ("count", "authors")
+    __slots__ = ("authors", "count")
 
     def __init__(self):
         self.count = 0
@@ -41,7 +41,7 @@ class HashtagCooccurrenceFilter(BaseFilter):
 
         self._maybe_prune()
 
-        normalized = sorted(set(h.lower() for h in hashtags))
+        normalized = sorted({h.lower() for h in hashtags})
         flagged_pairs = 0
         max_cooccurrence = 0
 
@@ -56,7 +56,7 @@ class HashtagCooccurrenceFilter(BaseFilter):
                 if record.count >= COOCCURRENCE_THRESHOLD and len(record.authors) >= MIN_UNIQUE_AUTHORS:
                     flagged_pairs += 1
 
-        self._entries.append((datetime.now(timezone.utc), set(normalized)))
+        self._entries.append((datetime.now(UTC), set(normalized)))
 
         if len(normalized) < MIN_HASHTAGS:
             score = 0.0
@@ -82,7 +82,7 @@ class HashtagCooccurrenceFilter(BaseFilter):
     def _maybe_prune(self) -> None:
         if len(self._entries) % 500 != 0:
             return
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=CORPUS_HOURS)
+        cutoff = datetime.now(UTC) - timedelta(hours=CORPUS_HOURS)
         self._entries = [(t, h) for t, h in self._entries if t >= cutoff]
 
     def export_state(self) -> dict:
