@@ -94,3 +94,58 @@ async def test_test_alert_reports_failure_instead_of_raising(fake_settings, monk
     assert result["channel"] == "slack"
     assert result["success"] is False
     assert result["error"]
+
+
+def test_escape_markdown_neutralizes_all_specials():
+    raw = "weird_label [with] *specials* _and_ `ticks`"
+    escaped = alerts._escape_markdown(raw)
+    assert escaped == "weird\\_label \\[with\\] \\*specials\\* \\_and\\_ \\`ticks\\`"
+    # No unescaped special survives.
+    import re as re_mod
+
+    assert not re_mod.search(r"(?<!\\)[*_`\[\]]", escaped)
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_escapes_user_content(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "ok"
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None):
+            captured["url"] = url
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(alerts.httpx, "AsyncClient", FakeAsyncClient)
+
+    msg = {
+        "label": "Shadow_op [coordinated] *push*",
+        "confidence_pct": 90,
+        "platforms_str": "TELEGRAM, RSS",
+        "account_count": 12,
+        "post_count": 340,
+        "inspector_url": "http://localhost:3030?campaign=abc",
+        "campaign_id": "abc",
+        "timestamp": "",
+    }
+    ok = await alerts._send_telegram("token", "chat", msg)
+
+    assert ok is True
+    assert captured["url"] == "https://api.telegram.org/bottoken/sendMessage"
+    text = captured["payload"]["text"]
+    assert "*Shadow\\_op \\[coordinated\\] \\*push\\**" in text
+    assert "Platforms: TELEGRAM, RSS" in text
+    assert captured["payload"]["parse_mode"] == "Markdown"

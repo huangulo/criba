@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 import httpx
 
@@ -8,6 +9,15 @@ from criba.celery_app import app
 logger = logging.getLogger(__name__)
 
 DASHBOARD_BASE_URL = "http://localhost:3030"
+
+# Telegram's legacy Markdown parse mode rejects messages with unbalanced
+# specials (400 Bad Request), so interpolated values must be escaped.
+_MARKDOWN_SPECIALS_RE = re.compile(r"([*_`\[\]])")
+
+
+def _escape_markdown(text: str) -> str:
+    """Escape Telegram legacy-Markdown specials in user-provided text."""
+    return _MARKDOWN_SPECIALS_RE.sub(r"\\\1", text)
 
 
 def _build_message(campaign: dict) -> dict:
@@ -78,9 +88,9 @@ async def _send_discord(webhook_url: str, msg: dict) -> bool:
 async def _send_telegram(bot_token: str, chat_id: str, msg: dict) -> bool:
     text = (
         f"🚨 *Astroturfing Campaign Detected*\n\n"
-        f"*{msg['label']}*\n\n"
+        f"*{_escape_markdown(msg['label'])}*\n\n"
         f"Confidence: *{msg['confidence_pct']}%*\n"
-        f"Platforms: {msg['platforms_str']}\n"
+        f"Platforms: {_escape_markdown(msg['platforms_str'])}\n"
         f"Authors: {msg['account_count']} | Posts: {msg['post_count']}\n\n"
         f"[View Campaign Inspector]({msg['inspector_url']})"
     )
