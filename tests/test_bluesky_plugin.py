@@ -1,4 +1,5 @@
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,6 +39,13 @@ class FakeClient:
 
 async def _drain(plugin, config):
     return [post async for post in plugin.stream(config)]
+
+
+def _async_returning(value):
+    async def getter():
+        return value
+
+    return getter
 
 
 @pytest.fixture
@@ -96,3 +104,82 @@ async def test_stream_skips_without_credentials_or_stored_session(monkeypatch, t
     posts = await _drain(plugin, {"keywords": ["election"]})
     assert posts == []
     assert fake.login_calls == 0
+
+
+def _paginated_client(search_pages, feed_pages):
+    """AsyncClient stand-in serving cursor-bearing pages.
+
+    Each element of search_pages/feed_pages is (items, cursor); the last page
+    repeats if the plugin keeps requesting beyond it.
+    """
+
+    calls = {"search": [], "feed": []}
+
+    async def search_posts(params=None):
+        calls["search"].append(dict(params or {}))
+        posts, cursor = search_pages[min(len(calls["search"]) - 1, len(search_pages) - 1)]
+        return SimpleNamespace(posts=posts, cursor=cursor)
+
+    async def get_author_feed(params=None):
+        calls["feed"].append(dict(params or {}))
+        posts, cursor = feed_pages[min(len(calls["feed"]) - 1, len(feed_pages) - 1)]
+        return SimpleNamespace(feed=posts, cursor=cursor)
+
+    client = SimpleNamespace(
+        app=SimpleNamespace(
+            bsky=SimpleNamespace(
+                feed=SimpleNamespace(search_posts=search_posts, get_author_feed=get_author_feed)
+            )
+        )
+    )
+    return client, calls
+
+
+@pytest.mark.asyncio
+async def test_search_follows_cursor_until_exhausted(monkeypatch):
+    client, calls = _paginated_client(
+        search_pages=[(["p1", "p2"], "cursor-1"), (["p3"], None)],
+        feed_pages=[],
+    )
+    plugin = BlueskyPlugin()
+    monkeypatch.setattr(plugin, "_get_client", _async_returning(client))
+    monkeypatch.setattr(plugin, "_post_to_raw_post", lambda post: post)
+
+    posts = await _drain(plugin, {"keywords": ["election"]})
+
+    assert posts == ["p1", "p2", "p3"]
+    assert len(calls["search"]) == 2
+    assert "cursor" not in calls["search"][0]
+    assert calls["search"][1]["cursor"] == "cursor-1"
+
+
+@pytest.mark.asyncio
+async def test_search_stops_at_max_pages(monkeypatch):
+    client, calls = _paginated_client(search_pages=[(["p"], "always-more")], feed_pages=[])
+    plugin = BlueskyPlugin()
+    monkeypatch.setattr(plugin, "_get_client", _async_returning(client))
+    monkeypatch.setattr(plugin, "_post_to_raw_post", lambda post: post)
+
+    posts = await _drain(plugin, {"keywords": ["election"]})
+
+    assert posts == ["p"] * bluesky_plugin_module.MAX_PAGES
+    assert len(calls["search"]) == bluesky_plugin_module.MAX_PAGES
+
+
+@pytest.mark.asyncio
+async def test_author_feed_follows_cursor_until_exhausted(monkeypatch):
+    client, calls = _paginated_client(
+        search_pages=[],
+        feed_pages=[(["a1"], "cursor-1"), (["a2", "a3"], None)],
+    )
+    plugin = BlueskyPlugin()
+    monkeypatch.setattr(plugin, "_get_client", _async_returning(client))
+    monkeypatch.setattr(plugin, "_post_to_raw_post", lambda post: post)
+
+    posts = await _drain(plugin, {"handles": ["user.bsky.social"]})
+
+    assert posts == ["a1", "a2", "a3"]
+    assert len(calls["feed"]) == 2
+    assert calls["feed"][0]["actor"] == "user.bsky.social"
+    assert "cursor" not in calls["feed"][0]
+    assert calls["feed"][1]["cursor"] == "cursor-1"

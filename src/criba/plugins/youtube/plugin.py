@@ -17,6 +17,12 @@ MENTION_RE = re.compile(r"@(\w+)")
 
 QUOTA_REASONS = {"quotaExceeded", "rateLimitExceeded", "dailyLimitExceeded"}
 
+# commentThreads returns at most 100 threads per page; a viral video gathers
+# more comments between polls than one 50-thread page, so follow the
+# nextPageToken, bounded so one video cannot monopolize the run. Repeats are
+# deduped downstream.
+MAX_COMMENT_PAGES = 4
+
 
 def _quota_reason(exc: HttpError) -> str:
     try:
@@ -146,12 +152,14 @@ class YouTubePlugin(SourcePlugin):
 
             try:
                 logger.info("Fetching YouTube videos from channel: %s", channel_id)
+                # search.list costs the same quota units regardless of
+                # maxResults, so take the largest page available.
                 videos_response = youtube.search().list(
                     part="snippet",
                     channelId=channel_id,
                     type="video",
                     order="date",
-                    maxResults=10,
+                    maxResults=50,
                 ).execute()
             except HttpError as exc:
                 if exc.status_code == 403 and _is_quota_error(exc):
@@ -170,48 +178,57 @@ class YouTubePlugin(SourcePlugin):
                 if not video_id:
                     continue
 
-                try:
-                    logger.info("Fetching comments for video: %s", video_id)
-                    comments_response = youtube.commentThreads().list(
-                        part="snippet,replies",
-                        videoId=video_id,
-                        maxResults=50,
-                        textFormat="plainText",
-                    ).execute()
-                except HttpError as exc:
-                    if exc.status_code == 403 and _is_quota_error(exc):
-                        logger.warning("YouTube API quota exceeded, stopping stream")
-                        return
-                    # A 403 with a non-quota reason (e.g. comments disabled on
-                    # the video) must only skip this video, not the whole run.
-                    logger.warning(
-                        "Skipping comments for video %s: HTTP %s (%s)",
-                        video_id, exc.status_code, _quota_reason(exc) or "unknown reason",
-                    )
-                    continue
-                except Exception:
-                    logger.exception("Error fetching comments for video %s", video_id)
-                    continue
-
-                comment_threads = comments_response.get("items", [])
-                for thread in comment_threads:
-                    top_level_comment = thread.get("snippet", {}).get("topLevelComment", {})
-                    if top_level_comment:
-                        yield self._comment_to_raw_post(
-                            top_level_comment,
-                            video_id,
-                            video_title,
-                            reply_to=None,
-                            is_reply_comment=False,
+                page_token: str | None = None
+                for _ in range(MAX_COMMENT_PAGES):
+                    try:
+                        logger.info("Fetching comments for video: %s", video_id)
+                        request_args: dict = {
+                            "part": "snippet,replies",
+                            "videoId": video_id,
+                            "maxResults": 50,
+                            "textFormat": "plainText",
+                        }
+                        if page_token:
+                            request_args["pageToken"] = page_token
+                        comments_response = youtube.commentThreads().list(**request_args).execute()
+                    except HttpError as exc:
+                        if exc.status_code == 403 and _is_quota_error(exc):
+                            logger.warning("YouTube API quota exceeded, stopping stream")
+                            return
+                        # A 403 with a non-quota reason (e.g. comments disabled
+                        # on the video) must only skip this video, not the run.
+                        logger.warning(
+                            "Skipping comments for video %s: HTTP %s (%s)",
+                            video_id, exc.status_code, _quota_reason(exc) or "unknown reason",
                         )
+                        break
+                    except Exception:
+                        logger.exception("Error fetching comments for video %s", video_id)
+                        break
 
-                    top_comment_id = top_level_comment.get("id", "") if top_level_comment else None
-                    replies = thread.get("replies", {}).get("comments", [])
-                    for reply in replies:
-                        yield self._comment_to_raw_post(
-                            reply,
-                            video_id,
-                            video_title,
-                            reply_to=top_comment_id,
-                            is_reply_comment=True,
-                        )
+                    comment_threads = comments_response.get("items", [])
+                    for thread in comment_threads:
+                        top_level_comment = thread.get("snippet", {}).get("topLevelComment", {})
+                        if top_level_comment:
+                            yield self._comment_to_raw_post(
+                                top_level_comment,
+                                video_id,
+                                video_title,
+                                reply_to=None,
+                                is_reply_comment=False,
+                            )
+
+                        top_comment_id = top_level_comment.get("id", "") if top_level_comment else None
+                        replies = thread.get("replies", {}).get("comments", [])
+                        for reply in replies:
+                            yield self._comment_to_raw_post(
+                                reply,
+                                video_id,
+                                video_title,
+                                reply_to=top_comment_id,
+                                is_reply_comment=True,
+                            )
+
+                    page_token = comments_response.get("nextPageToken")
+                    if not page_token or not comment_threads:
+                        break

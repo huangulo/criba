@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 HASHTAG_RE = re.compile(r"#(\w+)")
 MENTION_RE = re.compile(r"@(\w+)")
 
+# Polls are periodic, so a single 50-post page silently misses anything
+# published faster than the poll interval; follow the cursor instead, bounded
+# so one busy feed cannot monopolize the run. Repeats are deduped downstream.
+MAX_PAGES = 4
+
 
 class BlueskyPlugin(SourcePlugin):
 
@@ -228,6 +233,36 @@ class BlueskyPlugin(SourcePlugin):
         self._client_loop = current_loop
         return self._client
 
+    async def _iter_search(self, client, keyword: str) -> AsyncIterator[RawPost]:
+        """Paginate keyword search results up to MAX_PAGES."""
+        cursor: str | None = None
+        for _ in range(MAX_PAGES):
+            params: dict = {"q": keyword, "limit": 50}
+            if cursor:
+                params["cursor"] = cursor
+            response = await client.app.bsky.feed.search_posts(params=params)
+            posts = getattr(response, "posts", None) or []
+            for post in posts:
+                yield self._post_to_raw_post(post)
+            cursor = getattr(response, "cursor", None)
+            if not cursor or not posts:
+                return
+
+    async def _iter_author_feed(self, client, actor: str) -> AsyncIterator[RawPost]:
+        """Paginate an author's feed up to MAX_PAGES."""
+        cursor: str | None = None
+        for _ in range(MAX_PAGES):
+            params: dict = {"actor": actor, "limit": 50}
+            if cursor:
+                params["cursor"] = cursor
+            response = await client.app.bsky.feed.get_author_feed(params=params)
+            feed = getattr(response, "feed", None) or []
+            for post in feed:
+                yield self._post_to_raw_post(post)
+            cursor = getattr(response, "cursor", None)
+            if not cursor or not feed:
+                return
+
     async def stream(self, config: dict) -> AsyncIterator[RawPost]:
         keywords = config.get("keywords", [])
         handles = config.get("handles", [])
@@ -244,27 +279,15 @@ class BlueskyPlugin(SourcePlugin):
         for keyword in keywords:
             try:
                 logger.info("Searching Bluesky for keyword: %s", keyword)
-                response = await client.app.bsky.feed.search_posts(
-                    params={"q": keyword, "limit": 50}
-                )
-
-                if hasattr(response, "posts") and response.posts:
-                    for post in response.posts:
-                        yield self._post_to_raw_post(post)
-
+                async for post in self._iter_search(client, keyword):
+                    yield post
             except Exception:
                 logger.exception("Error searching Bluesky for keyword: %s", keyword)
 
         for actor in handles:
             try:
                 logger.info("Fetching Bluesky author feed: %s", actor)
-                response = await client.app.bsky.feed.get_author_feed(
-                    params={"actor": actor, "limit": 50}
-                )
-
-                if hasattr(response, "feed") and response.feed:
-                    for post in response.feed:
-                        yield self._post_to_raw_post(post)
-
+                async for post in self._iter_author_feed(client, actor):
+                    yield post
             except Exception:
                 logger.exception("Error fetching Bluesky author feed: %s", actor)

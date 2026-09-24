@@ -15,6 +15,13 @@ HASHTAG_RE = re.compile(r"#(\w+)")
 MENTION_RE = re.compile(r"@(\w+)")
 USER_AGENT = "linux:criba-reddit-plugin:v0.1.0"
 
+# A single 25-post page of /new silently misses everything published faster
+# than the 120s poll interval on active subreddits; follow the "after" token
+# instead, bounded so one busy subreddit cannot monopolize the run. Repeats
+# are deduped downstream.
+MAX_PAGES = 4
+PAGE_LIMIT = 100
+
 
 class RedditPlugin(SourcePlugin):
 
@@ -100,23 +107,34 @@ class RedditPlugin(SourcePlugin):
             headers={"User-Agent": USER_AGENT},
         ) as client:
             for subreddit in subreddits:
-                url = f"https://www.reddit.com/r/{subreddit}/new.json?limit=25&raw_json=1"
-                try:
-                    logger.info("Fetching Reddit posts: r/%s", subreddit)
-                    response = await client.get(url)
-                    response.raise_for_status()
+                after: str | None = None
+                for _ in range(MAX_PAGES):
+                    url = f"https://www.reddit.com/r/{subreddit}/new.json"
+                    params: dict = {"limit": PAGE_LIMIT, "raw_json": 1}
+                    if after:
+                        params["after"] = after
+                    try:
+                        logger.info("Fetching Reddit posts: r/%s", subreddit)
+                        response = await client.get(url, params=params)
+                        response.raise_for_status()
 
-                    data = response.json()
-                    children = data.get("data", {}).get("children", [])
+                        data = response.json()
+                        listing = data.get("data", {})
+                        children = listing.get("children", [])
 
-                    for child in children:
-                        if child.get("kind") == "t3":
-                            yield self._submission_to_raw_post(child["data"])
+                        for child in children:
+                            if child.get("kind") == "t3":
+                                yield self._submission_to_raw_post(child["data"])
 
-                except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code == 429:
-                        logger.warning("Reddit rate limited for r/%s, backing off", subreddit)
-                    else:
-                        logger.error("Reddit HTTP error for r/%s: %s", subreddit, exc)
-                except Exception:
-                    logger.exception("Error fetching Reddit posts from r/%s", subreddit)
+                        after = listing.get("after")
+                        if not after or not children:
+                            break
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code == 429:
+                            logger.warning("Reddit rate limited for r/%s, backing off", subreddit)
+                        else:
+                            logger.error("Reddit HTTP error for r/%s: %s", subreddit, exc)
+                        break
+                    except Exception:
+                        logger.exception("Error fetching Reddit posts from r/%s", subreddit)
+                        break
