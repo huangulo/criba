@@ -15,6 +15,28 @@ def analyze_flagged_posts(self) -> dict:
         raise self.retry(exc=exc)
 
 
+async def _author_network_evidence(session, post) -> dict:
+    """Summarize the author's persisted interaction edges.
+
+    The author_graph primary key leads with (project_id, source,
+    source_author), so this lookup is index-backed.
+    """
+    from sqlalchemy import func, select
+
+    from criba.db.models import AuthorGraph
+
+    stmt = select(
+        func.count(func.distinct(AuthorGraph.target_author)),
+        func.coalesce(func.sum(AuthorGraph.weight), 0),
+    ).where(
+        AuthorGraph.project_id == post.project_id,
+        AuthorGraph.source == post.source,
+        AuthorGraph.source_author == post.author_id,
+    )
+    targets, weight = (await session.execute(stmt)).one()
+    return {"targets": int(targets), "weight": int(weight)}
+
+
 async def _analyze_flagged_posts_async() -> dict:
     from datetime import datetime, timezone
 
@@ -55,18 +77,37 @@ async def _analyze_flagged_posts_async() -> dict:
         logger.info("Found %d posts pending LLM analysis", len(rows))
 
         for post, score in rows:
+            account_age_days = (
+                (datetime.now(timezone.utc) - post.author_created).days
+                if post.author_created
+                else None
+            )
+            network = await _author_network_evidence(session, post)
+
             prompt = build_analysis_prompt(
                 source=post.source,
                 content=post.content,
-                account_age_days=(
-                    (datetime.now(timezone.utc) - post.author_created).days
-                    if post.author_created
-                    else None
-                ),
-                anomaly_score=score.composite_score,
-                copypasta_count=score.copypasta_score,
-                temporal_flag=score.temporal_anomaly > 0.5,
-                network_score=0.0,
+                evidence={
+                    "author_handle": post.author_handle,
+                    "account_age_days": account_age_days,
+                    "language": post.language,
+                    "copypasta_similarity": score.copypasta_score,
+                    "temporal_anomaly": score.temporal_anomaly,
+                    "account_age_flag": score.account_age_flag,
+                    "composite_score": score.composite_score,
+                    "interaction_targets": network["targets"],
+                    "interaction_weight": network["weight"],
+                    "hashtags": (post.hashtags or [])[:15],
+                    "mentions": (post.mentions or [])[:15],
+                    "engagement": {
+                        key: value
+                        for key, value in (post.engagement or {}).items()
+                        if isinstance(value, (int, float)) and not isinstance(value, bool)
+                    },
+                    "media_count": len(post.media_urls or []),
+                    "is_reply": bool(post.reply_to),
+                    "published_at": post.published_at.isoformat(),
+                },
             )
 
             llm_response = await client.analyze(prompt)
