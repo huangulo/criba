@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from criba.api.auth import require_api_key, require_api_key_ws
+from criba.api.health import router as health_router
 from criba.api.routes import router
 from criba.api.ws import alerts_subscriber
 from criba.api.ws import router as ws_router
@@ -52,6 +53,9 @@ def create_app() -> FastAPI:
 
     # When CRIBA_API_KEY is set, every route requires the key: REST via the
     # X-API-Key header, the WebSocket via ?api_key=. Unset, the API runs open.
+    # /health is mounted without the dependency so infra probes (docker
+    # healthcheck, balancers) can monitor without credentials.
+    app.include_router(health_router)
     app.include_router(router, dependencies=[Depends(require_api_key)])
     app.include_router(ws_router, dependencies=[Depends(require_api_key_ws)])
 
