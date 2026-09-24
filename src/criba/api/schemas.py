@@ -35,6 +35,7 @@ class FlaggedPostResponse(BaseModel):
     narrative_category: str | None
     coordination_probability: float | None
     recommended_action: str | None
+    media_urls: list[str] = []
 
 
 class StatsSummary(BaseModel):
@@ -88,6 +89,7 @@ class InspectPost(BaseModel):
     composite_score: float | None = None
     coordination_probability: float | None = None
     narrative_category: str | None = None
+    media_urls: list[str] = []
 
 
 class CopypastaPhrase(BaseModel):
@@ -232,6 +234,7 @@ class SimilarPost(BaseModel):
     published_at: datetime
     content: str
     similarity: float
+    media_urls: list[str] = []
 
 
 class AuthorRecentPost(BaseModel):
@@ -240,6 +243,7 @@ class AuthorRecentPost(BaseModel):
     published_at: datetime
     content: str
     composite_score: float | None
+    media_urls: list[str] = []
 
 
 class AuthorStats(BaseModel):

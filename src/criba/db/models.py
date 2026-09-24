@@ -27,6 +27,7 @@ class Post(Base):
     engagement: Mapped[dict] = mapped_column(JSONB, default=dict)
     hashtags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     mentions: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    media_urls: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     reply_to: Mapped[str | None] = mapped_column(String(255))
     raw_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
     project_id: Mapped[uuid.UUID] = mapped_column(

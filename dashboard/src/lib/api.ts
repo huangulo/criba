@@ -38,6 +38,7 @@ export interface FlaggedPost {
   narrative_category: string | null;
   coordination_probability: number | null;
   recommended_action: string | null;
+  media_urls?: string[];
 }
 
 export interface StatsSummary {
@@ -127,6 +128,7 @@ export interface InspectPost {
   composite_score: number | null;
   coordination_probability: number | null;
   narrative_category: string | null;
+  media_urls?: string[];
 }
 
 export interface CopypastaPhrase {
@@ -374,6 +376,7 @@ export interface SimilarPost {
   published_at: string;
   content: string;
   similarity: number;
+  media_urls?: string[];
 }
 
 export interface AuthorRecentPost {
@@ -382,6 +385,7 @@ export interface AuthorRecentPost {
   published_at: string;
   content: string;
   composite_score: number | null;
+  media_urls?: string[];
 }
 
 export interface AuthorStats {

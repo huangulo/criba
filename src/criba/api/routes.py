@@ -151,6 +151,7 @@ async def list_flagged_posts(
             narrative_category=analysis.narrative_category if analysis else None,
             coordination_probability=analysis.coordination_probability if analysis else None,
             recommended_action=analysis.recommended_action if analysis else None,
+            media_urls=post.media_urls,
         )
         for post, score, analysis in rows
     ]
@@ -425,6 +426,7 @@ async def inspect_campaign(
             composite_score=score.composite_score if score else None,
             coordination_probability=analysis.coordination_probability if analysis else None,
             narrative_category=analysis.narrative_category if analysis else None,
+            media_urls=post.media_urls,
         )
         for post, score, analysis in rows
     ]
@@ -911,7 +913,14 @@ async def get_eval_evidence(
 
     candidates = (
         await session.execute(
-            select(Post.id, Post.author_handle, Post.source, Post.published_at, Post.content)
+            select(
+                Post.id,
+                Post.author_handle,
+                Post.source,
+                Post.published_at,
+                Post.content,
+                Post.media_urls,
+            )
             .where(Post.project_id == project_id)
             .where(Post.id != post_id)
             .where(Post.published_at.between(window_start, window_end))
@@ -921,22 +930,37 @@ async def get_eval_evidence(
     ).fetchall()
 
     scored = []
-    for cid, chandle, csrc, cpub, ccontent in candidates:
+    for cid, chandle, csrc, cpub, ccontent, cmedia in candidates:
         if is_junk(ccontent, 2):
             continue
         sim = _jaccard(target_shingles, _extract_shingles(ccontent))
         if sim >= 0.5:
-            scored.append((sim, cid, chandle, csrc, cpub, ccontent))
+            scored.append((sim, cid, chandle, csrc, cpub, ccontent, cmedia))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     similar_posts = [
-        SimilarPost(post_id=sid, author_handle=sh, source=ss, published_at=sp, content=sc, similarity=round(sv, 3))
-        for sv, sid, sh, ss, sp, sc in scored[:10]
+        SimilarPost(
+            post_id=sid,
+            author_handle=sh,
+            source=ss,
+            published_at=sp,
+            content=sc,
+            similarity=round(sv, 3),
+            media_urls=sm or [],
+        )
+        for sv, sid, sh, ss, sp, sc, sm in scored[:10]
     ]
 
     author_recent = (
         await session.execute(
-            select(Post.id, Post.source, Post.published_at, Post.content, HeuristicScore.composite_score)
+            select(
+                Post.id,
+                Post.source,
+                Post.published_at,
+                Post.content,
+                HeuristicScore.composite_score,
+                Post.media_urls,
+            )
             .outerjoin(HeuristicScore, HeuristicScore.post_id == Post.id)
             .where(Post.project_id == project_id)
             .where(Post.author_id == post.author_id)
@@ -947,9 +971,14 @@ async def get_eval_evidence(
 
     author_recent_posts = [
         AuthorRecentPost(
-            post_id=aid, source=asrc, published_at=apub, content=acontent, composite_score=ascore,
+            post_id=aid,
+            source=asrc,
+            published_at=apub,
+            content=acontent,
+            composite_score=ascore,
+            media_urls=amedia or [],
         )
-        for aid, asrc, apub, acontent, ascore in author_recent
+        for aid, asrc, apub, acontent, ascore, amedia in author_recent
     ]
 
     agg = (

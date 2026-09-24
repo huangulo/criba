@@ -153,6 +153,7 @@ async def _ingest_source_async(source_name: str) -> dict:
                     engagement=raw_post.engagement,
                     hashtags=raw_post.hashtags,
                     mentions=raw_post.mentions,
+                    media_urls=raw_post.media_urls,
                     reply_to=raw_post.reply_to,
                     raw_metadata=raw_post.raw_metadata,
                     project_id=project_id,
