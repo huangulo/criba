@@ -565,6 +565,7 @@ Criba's data is valuable for computational social science, disinformation resear
 
 #### Production Hardening
 - [ ] **Authentication & authorization** — Currently the API has no auth. Need API key or OAuth2 layer for multi-user deployments.
+- [ ] **Next.js 16 upgrade (dependency security)** — `npm audit` in `dashboard/` reports 1 critical + 4 high against `next@14.2.35` (unauthenticated RCE in the Image Optimization API, cache poisoning, SSRF in rewrites) and its bundled postcss/eslint toolchain. The dashboard uses none of the affected features (no `next/image`, middleware, rewrites, or Server Actions; the single page is client-rendered and talks to the local API) and deployments are self-hosted, so exposure today is low — but the only upstream fix is the breaking `next@16` migration (React 19, ESLint 9) and it should not be deferred indefinitely. Semver-compatible audit fixes (brace-expansion, js-yaml, nanoid, postcss-selector-parser) are already applied.
 - [ ] **Rate limiting** — API rate limiting to prevent abuse on public-facing deployments.
 - [ ] **Data retention policies** — Configurable TTL for raw posts, embeddings, and analysis results. Old data should be archived or purged to manage disk usage on long-running deployments.
 - [ ] **Health checks & monitoring** — `/health` endpoint with dependency status (PostgreSQL, Redis, Ollama). Prometheus metrics for ingestion rate, queue depth, LLM latency, error rates.
