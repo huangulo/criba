@@ -1,14 +1,16 @@
+import asyncio
 import logging
 import os
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 from atproto import AsyncClient
 
-from criba.models.raw_post import RawPost
-from criba.models.rate_limit import RateLimitConfig
 from criba.models.plugin_base import SourcePlugin
+from criba.models.rate_limit import RateLimitConfig
+from criba.models.raw_post import RawPost
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,10 @@ MENTION_RE = re.compile(r"@(\w+)")
 
 
 class BlueskyPlugin(SourcePlugin):
+
+    def __init__(self):
+        self._client: AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     def get_name(self) -> str:
         return "bluesky"
@@ -61,7 +67,7 @@ class BlueskyPlugin(SourcePlugin):
         author = post.author
         record = post.record
 
-        published_at = datetime.now(timezone.utc)
+        published_at = datetime.now(UTC)
         if hasattr(record, "created_at") and record.created_at:
             try:
                 published_at = datetime.fromisoformat(record.created_at.replace("Z", "+00:00"))
@@ -151,6 +157,77 @@ class BlueskyPlugin(SourcePlugin):
             },
         )
 
+    def _session_path(self) -> Path:
+        return Path(os.environ.get("BLUESKY_SESSION_PATH", "bluesky_session.string"))
+
+    def _load_session_string(self) -> str | None:
+        try:
+            stored = self._session_path().read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return stored or None
+
+    def _save_session_string(self, session_string: str) -> None:
+        try:
+            self._session_path().write_text(session_string + "\n", encoding="utf-8")
+        except OSError:
+            logger.warning("Could not persist Bluesky session to %s", self._session_path(), exc_info=True)
+
+    async def _get_client(self) -> AsyncClient | None:
+        """One logged-in client per event loop, reused across polls.
+
+        The plugin instance is a process-wide singleton but Celery runs each
+        task on a fresh event loop, and the httpx-backed client cannot cross
+        loops. The session string is persisted and restored instead, so a
+        password login happens once ever, not once per poll.
+        """
+        current_loop = asyncio.get_running_loop()
+        if self._client is not None and self._client_loop is not current_loop:
+            # The old loop is gone; its connections cannot be reused.
+            self._client = None
+
+        if self._client is not None:
+            return self._client
+
+        client = AsyncClient()
+
+        def persist_session(_: object) -> None:
+            # Fires on login and on every session refresh; the refresh token
+            # rotates, so the stored string must be kept current or restores
+            # start failing.
+            try:
+                self._save_session_string(client.export_session_string())
+            except Exception:
+                logger.warning("Could not persist the refreshed Bluesky session", exc_info=True)
+
+        client.on_session_change(persist_session)
+
+        stored_session = self._load_session_string()
+        if stored_session:
+            try:
+                await client.login(session_string=stored_session)
+                logger.info("Bluesky session restored from %s", self._session_path())
+                self._client = client
+                self._client_loop = current_loop
+                return self._client
+            except Exception:
+                logger.warning(
+                    "Stored Bluesky session rejected; falling back to password login", exc_info=True
+                )
+
+        handle = os.environ.get("BLUESKY_HANDLE")
+        password = os.environ.get("BLUESKY_APP_PASSWORD")
+        if not handle or not password:
+            logger.warning(
+                "No usable Bluesky session and BLUESKY_HANDLE/BLUESKY_APP_PASSWORD not set, skipping"
+            )
+            return None
+
+        await client.login(handle, password)
+        self._client = client
+        self._client_loop = current_loop
+        return self._client
+
     async def stream(self, config: dict) -> AsyncIterator[RawPost]:
         keywords = config.get("keywords", [])
         handles = config.get("handles", [])
@@ -159,14 +236,10 @@ class BlueskyPlugin(SourcePlugin):
             logger.warning("No keywords or handles configured for Bluesky")
             return
 
-        handle = os.environ.get("BLUESKY_HANDLE")
-        password = os.environ.get("BLUESKY_APP_PASSWORD")
-        if not handle or not password:
-            logger.warning("BLUESKY_HANDLE or BLUESKY_APP_PASSWORD not set, skipping")
+        client = await self._get_client()
+        if client is None:
+            logger.warning("Bluesky client not available, skipping")
             return
-
-        client = AsyncClient()
-        await client.login(handle, password)
 
         for keyword in keywords:
             try:
@@ -182,11 +255,11 @@ class BlueskyPlugin(SourcePlugin):
             except Exception:
                 logger.exception("Error searching Bluesky for keyword: %s", keyword)
 
-        for handle in handles:
+        for actor in handles:
             try:
-                logger.info("Fetching Bluesky author feed: %s", handle)
+                logger.info("Fetching Bluesky author feed: %s", actor)
                 response = await client.app.bsky.feed.get_author_feed(
-                    params={"actor": handle, "limit": 50}
+                    params={"actor": actor, "limit": 50}
                 )
 
                 if hasattr(response, "feed") and response.feed:
@@ -194,4 +267,4 @@ class BlueskyPlugin(SourcePlugin):
                         yield self._post_to_raw_post(post)
 
             except Exception:
-                logger.exception("Error fetching Bluesky author feed: %s", handle)
+                logger.exception("Error fetching Bluesky author feed: %s", actor)
